@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "luna-music-manager"
+version = "0.1.0"
+description = "A local-first music library cleaner"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+dependencies = [
+    "mutagen>=1.47,<2",
+]
+
+[project.scripts]
+luna = "luna.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
