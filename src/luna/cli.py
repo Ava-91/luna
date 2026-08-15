@@ -1,6 +1,7 @@
 import argparse
 from pathlib import Path
 
+from .duplicates import find_duplicates
 from .metadata import validate_library
 from .scanner import scan_library
 
@@ -21,10 +22,12 @@ def main() -> None:
 
         tracks = scan_library(root)
         validations = validate_library(tracks)
+        duplicate_groups = find_duplicates(tracks)
         problematic = [result for result in validations if not result.valid]
 
         print(f"Found {len(tracks)} audio file(s).")
         print(f"Metadata issues: {len(problematic)} file(s).")
+        print(f"Duplicate groups: {len(duplicate_groups)}.")
 
         for track, validation in zip(tracks, validations):
             title = track.title or "<missing title>"
@@ -33,6 +36,11 @@ def main() -> None:
             print(f"- {artist} — {title} [{album}] :: {track.path}")
             for issue in validation.issues:
                 print(f"  ! {issue.message}")
+
+        for index, group in enumerate(duplicate_groups, start=1):
+            print(f"Duplicate group {index} ({group.size} files, {group.digest[:12]}…):")
+            for track in group.tracks:
+                print(f"  = {track.path}")
 
 
 if __name__ == "__main__":
