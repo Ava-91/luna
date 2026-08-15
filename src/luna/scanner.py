@@ -12,6 +12,7 @@ class Track:
     title: str | None
     artist: str | None
     album: str | None
+    track_number: int | None = None
 
 
 def scan_library(root: Path) -> list[Track]:
@@ -31,6 +32,7 @@ def scan_library(root: Path) -> list[Track]:
                 title=_first(tags, "title"),
                 artist=_first(tags, "artist"),
                 album=_first(tags, "album"),
+                track_number=_track_number(tags),
             )
         )
 
@@ -44,3 +46,13 @@ def _first(tags: object, key: str) -> str | None:
     if isinstance(value, list):
         return str(value[0]) if value else None
     return str(value) if value is not None else None
+
+
+def _track_number(tags: object) -> int | None:
+    value = _first(tags, "tracknumber")
+    if not value:
+        return None
+    try:
+        return int(value.split("/", 1)[0])
+    except ValueError:
+        return None
