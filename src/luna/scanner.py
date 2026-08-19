@@ -41,8 +41,9 @@ def inspect_file(path:Path)->Track:
     try: stat=path.stat()
     except OSError as exc: return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),metadata_error=str(exc))
     try:
-        audio=File(path,easy=True); tags=audio.tags if audio is not None else None
-        raw={str(k):v for k,v in (tags.items() if hasattr(tags,"items") else [])}
+        audio=File(path,easy=True)
+        if audio is None: return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error="Audio file could not be parsed.")
+        tags=audio.tags; raw={str(k):v for k,v in (tags.items() if hasattr(tags,"items") else [])}
         return Track(path,_first(tags,"title"),_first(tags,"artist"),_first(tags,"album"),_number(_first(tags,"tracknumber")),_first(tags,"albumartist"),_number(_first(tags,"discnumber")),_year(_first(tags,"date") or _first(tags,"year")),_first(tags,"genre"),path.suffix.lower().lstrip("."),stat.st_size,stat.st_mtime,raw)
     except Exception as exc:
         return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error=str(exc))
