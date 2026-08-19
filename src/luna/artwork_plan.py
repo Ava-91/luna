@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
-from .artwork import ArtworkInfo, group_artwork_by_album
+from .artwork import group_artwork_by_album
 
 @dataclass(frozen=True)
 class ArtworkCandidate:
@@ -26,8 +26,7 @@ def build_artwork_plan(tracks, candidates=None):
     for (album,artist),items in by_album.items():
         paths=tuple(sorted((x.path for x in items),key=str)); missing=any(not x.has_artwork or not x.valid for x in items)
         if missing:
-            candidate=candidate_map.get((album,artist))
-            result.append(ArtworkChange(album,artist,paths,"missing_or_invalid",candidate))
+            result.append(ArtworkChange(album,artist,paths,"missing_or_invalid",candidate_map.get((album,artist))))
     return result
 
 def local_candidates(directory:Path, album:str, album_artist:str):
