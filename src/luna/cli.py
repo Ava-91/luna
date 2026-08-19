@@ -1,57 +1,69 @@
-import argparse
+import argparse, json
 from pathlib import Path
-
-from .duplicates import find_duplicates
-from .filenames import suggest_renames
-from .metadata import validate_library
 from .scanner import scan_library
+from .metadata import validate_library
+from .duplicates import find_duplicates, find_probable_duplicates
+from .filenames import suggest_renames
+from .planner import build_rename_plan
+from .artwork import audit_artwork
+from .artwork_plan import build_artwork_plan, local_candidates
+from .report import build_report, render_report
+from .config import load_config, save_config, LibraryProfile, reset_config
+from .export import export_json, export_text, export_markdown
+from .apply import apply_rename_plan
+from .metadata_apply import build_metadata_plan, apply_metadata_plan
+from .backup import rollback
 
+def load_tracks(path):
+    profile=load_config(); return scan_library(path,profile.extensions,profile.ignored_paths,profile.max_workers)
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Inspect and clean a local music library.")
-    subparsers = parser.add_subparsers(dest="command", required=True)
+def main(argv=None):
+    parser=argparse.ArgumentParser(description="Luna — local-first music library cleaner")
+    sub=parser.add_subparsers(dest="command",required=True)
+    p=sub.add_parser("scan",help="Read-only scan"); p.add_argument("path",type=Path); p.add_argument("--json",action="store_true")
+    for name,help_text in (("inspect","Validate metadata"),("duplicates","Find exact and probable duplicates"),("artwork","Audit embedded artwork"),("rename-plan","Preview safe filename changes"),("report","Build library health report")):
+        q=sub.add_parser(name,help=help_text); q.add_argument("path",type=Path); q.add_argument("--output",type=Path); q.add_argument("--format",choices=("text","json","markdown"),default="text")
+    q=sub.add_parser("apply",help="Apply a reviewed plan; explicit --confirm required"); q.add_argument("path",type=Path); q.add_argument("--confirm",action="store_true"); q.add_argument("--log",type=Path,default=Path(".luna-operations.json"))
+    q=sub.add_parser("rollback",help="Rollback an operation log"); q.add_argument("log",type=Path); q.add_argument("--confirm",action="store_true")
+    q=sub.add_parser("config",help="Manage library profile"); q.add_argument("action",choices=("show","set","reset")); q.add_argument("roots",nargs="*")
+    q=sub.add_parser("gui",help="Launch optional PySide6 interface")
+    q=sub.add_parser("export",help="Export a read-only scan report"); q.add_argument("path",type=Path); q.add_argument("output",type=Path)
+    args=parser.parse_args(argv)
+    if args.command=="config":
+        if args.action=="show": print(json.dumps(load_config().__dict__,indent=2)); return
+        if args.action=="reset": reset_config(); return
+        profile=load_config(); profile.roots=args.roots; save_config(profile); print("Configuration saved."); return
+    if args.command=="rollback":
+        if not args.confirm: parser.error("rollback requires --confirm")
+        print(json.dumps(rollback(args.log,True),indent=2)); return
+    if args.command=="gui":
+        from .gui import launch; raise SystemExit(launch())
+    root=args.path.expanduser().resolve()
+    if not root.is_dir(): parser.error(f"Not a directory: {root}")
+    tracks=load_tracks(root); validations=validate_library(tracks); duplicates=find_duplicates(tracks); probable=find_probable_duplicates(tracks); art=audit_artwork(tracks); renames=build_rename_plan(tracks)
+    if args.command in {"scan","inspect"}:
+        payload=[{"path":str(t.path),"title":t.title,"artist":t.artist,"album":t.album,"format":t.format,"metadata_error":t.metadata_error,"issues":[i.message for i in v.issues]} for t,v in zip(tracks,validations)]
+        if getattr(args,"json",False): print(json.dumps(payload,ensure_ascii=False,indent=2)); return
+        for row in payload: print(f"{row['artist'] or '<missing artist>'} — {row['title'] or '<missing title>'} [{row['album'] or '<missing album>'}] :: {row['path']}"); [print(f"  ! {issue}") for issue in row["issues"]]
+        print(f"Found {len(tracks)} audio file(s). Metadata issues: {sum(not v.valid for v in validations)}."); return
+    if args.command=="duplicates":
+        payload={"exact":[{"digest":g.digest,"files":[str(t.path) for t in g.tracks]} for g in duplicates],"probable":[{"confidence":g.confidence,"reasons":g.reasons,"files":[str(t.path) for t in g.tracks]} for g in probable]}; text=json.dumps(payload,ensure_ascii=False,indent=2)
+    elif args.command=="artwork":
+        payload=[x.__dict__ | {"path":str(x.path)} for x in art]; text=json.dumps(payload,default=str,ensure_ascii=False,indent=2)
+    elif args.command=="rename-plan":
+        payload=[{"source":str(x.source),"destination":str(x.destination) if x.destination else None,"status":x.status,"reason":x.reason} for x in renames]; text=json.dumps(payload,ensure_ascii=False,indent=2)
+    elif args.command=="report":
+        payload=build_report(tracks,validations,duplicates,art,renames); text=render_report(payload) if args.format=="text" else json.dumps(payload,ensure_ascii=False,indent=2)
+    elif args.command=="export":
+        payload=build_report(tracks,validations,duplicates,art,renames); export_json(payload,args.output); print(f"Wrote {args.output}"); return
+    elif args.command=="apply":
+        if not args.confirm: parser.error("apply requires --confirm")
+        print(json.dumps([r.__dict__ | {"source":str(r.source),"destination":str(r.destination)} for r in apply_rename_plan(renames,True,args.log)],indent=2)); return
+    else: return
+    if args.output:
+        if args.format=="json": export_text(text,args.output)
+        elif args.format=="markdown": export_markdown("Luna report",{"Summary":text},args.output)
+        else: export_text(text,args.output)
+    else: print(text)
 
-    scan = subparsers.add_parser("scan", help="Scan a music folder (read-only).")
-    scan.add_argument("path", type=Path)
-
-    args = parser.parse_args()
-
-    if args.command == "scan":
-        root = args.path.expanduser().resolve()
-        if not root.is_dir():
-            parser.error(f"Not a directory: {root}")
-
-        tracks = scan_library(root)
-        validations = validate_library(tracks)
-        duplicate_groups = find_duplicates(tracks)
-        rename_suggestions = suggest_renames(tracks)
-        problematic = [result for result in validations if not result.valid]
-        proposed = [item for item in rename_suggestions if item.has_change]
-
-        print(f"Found {len(tracks)} audio file(s).")
-        print(f"Metadata issues: {len(problematic)} file(s).")
-        print(f"Duplicate groups: {len(duplicate_groups)}.")
-        print(f"Filename suggestions: {len(proposed)}.")
-
-        for track, validation in zip(tracks, validations):
-            title = track.title or "<missing title>"
-            artist = track.artist or "<missing artist>"
-            album = track.album or "<missing album>"
-            print(f"- {artist} — {title} [{album}] :: {track.path}")
-            for issue in validation.issues:
-                print(f"  ! {issue.message}")
-
-        for suggestion in rename_suggestions:
-            if suggestion.has_change:
-                print(f"  → {suggestion.source.name} -> {suggestion.destination.name}")
-            elif suggestion.destination is None:
-                print(f"  ! {suggestion.source.name}: {suggestion.reason}")
-
-        for index, group in enumerate(duplicate_groups, start=1):
-            print(f"Duplicate group {index} ({group.size} files, {group.digest[:12]}…):")
-            for track in group.tracks:
-                print(f"  = {track.path}")
-
-
-if __name__ == "__main__":
-    main()
+if __name__=="__main__": main()
