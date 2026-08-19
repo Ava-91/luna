@@ -7,7 +7,7 @@ Luna is a **local-first music library cleaner** for messy metadata, artwork, fil
 - Scanning, inspection, duplicate detection, artwork auditing, reports, and rename plans are read-only.
 - Duplicate detection distinguishes exact byte matches from probable matches; Luna never deletes automatically.
 - Write operations require an explicit `--confirm` flag and refuse to overwrite unrelated files.
-- Rename operations can create a JSON operation log for rollback.
+- Rename and metadata operations can create a JSON operation log for rollback.
 - External metadata providers are opt-in abstractions; the core remains offline/local-only.
 
 ## Install
@@ -19,13 +19,7 @@ python -m venv .venv
 pip install -e .
 ```
 
-Optional features:
-
-```bash
-pip install -e '.[desktop]'   # PySide6 shell
-pip install -e '.[artwork]'   # Pillow dimensions/decoding
-pip install -e '.[dev]'       # pytest + ruff
-```
+Optional features: `pip install -e '.[desktop]'` for PySide6, `pip install -e '.[artwork]'` for Pillow, and `pip install -e '.[dev]'` for tests/linting.
 
 ## Commands
 
@@ -34,56 +28,33 @@ luna scan PATH
 luna inspect PATH
 luna duplicates PATH
 luna artwork PATH
+luna artwork-plan PATH
+luna normalize-plan PATH
 luna rename-plan PATH
 luna report PATH
 luna export PATH OUTPUT.json
 luna apply PATH --confirm --log .luna-operations.json
+luna apply PATH --metadata --confirm --log .luna-operations.json
 luna rollback .luna-operations.json --confirm
 luna config show|set|reset
 luna gui
 ```
 
-All inspection commands support deterministic JSON/text-oriented output where applicable. `rename-plan` is always a dry run. `apply` only executes the reviewed rename plan and requires explicit confirmation.
+## Supported formats and metadata
 
-## Supported formats
-
-MP3, FLAC, M4A, AAC, OGG, Opus, WAV, and WMA are recognized by default. Mutagen is used for common metadata fields including title, artist, album, album artist, track/disc number, year, and genre. Raw parsed metadata remains available on each scanned `Track` record for comparison.
+MP3, FLAC, M4A, AAC, OGG, Opus, WAV, and WMA are recognized by default. Mutagen reads title, artist, album, album artist, track/disc number, year, genre, and common raw tags. Missing, placeholder, malformed, and parser-error conditions are reported without modifying files.
 
 ## Workflows
 
-### Library health
+`report` summarizes tracks, formats, metadata issues, exact duplicate groups, probable duplicates, estimated duplicate waste, artwork gaps, and filename proposals. `duplicates` never deletes. `artwork` is read-only; `artwork-plan` ranks local cover candidates without applying them. `normalize-plan` and `rename-plan` are dry runs. `apply` requires explicit confirmation and can be rolled back from its operation log.
 
-Run `luna report Music/` to see track count, formats, metadata problems, exact duplicate groups, estimated duplicate waste, missing artwork, and filename suggestions.
+The optional `LibraryIndex` stores local file timestamps, sizes, hashes, normalized metadata, and artwork state in SQLite so unchanged files can be recognized between scans. Profiles live under `~/.config/luna/config.json` by default and can define roots, extensions, ignored paths, worker count, and naming preferences.
 
-### Metadata
+`MetadataProvider` is a provider-independent interface with source/confidence-bearing candidates. `LocalOnlyProvider` is the default offline provider; network providers are never contacted implicitly.
 
-`inspect` validates missing and placeholder values. `normalize` rules are deterministic and conservative: whitespace/separator cleanup and track/disc number parsing preserve intentional punctuation and Unicode. Original values are retained in the plan.
+The optional PySide6 UI provides folder selection, scan progress, a health summary, duplicate/rename counts, and an explicit read-only safety boundary. It reuses the same core modules as the CLI.
 
-### Duplicates
-
-Exact duplicates are SHA-256 groups. Probable duplicates use conservative metadata/file-property matches and include a confidence score and reasons. No file is removed by duplicate detection.
-
-### Artwork
-
-`artwork` checks embedded artwork, image payload validity, MIME type, and dimensions when Pillow is installed. Album/album-artist grouping makes review easier. Local `cover`, `folder`, `front`, and `albumart` candidates can be ranked into a replacement plan without applying them.
-
-### Rename/apply
-
-`rename-plan` shows current and proposed paths, detects collisions, sanitizes platform-reserved names, preserves extensions, and keeps deterministic ordering. `apply --confirm` performs only reviewed safe renames and records reversible operations when a log path is supplied.
-
-### SQLite index
-
-The optional `LibraryIndex` stores file metadata, hashes, artwork state, and timestamps locally. Unchanged files can be recognized without rescanning their contents. The database is not required for basic CLI use.
-
-### Providers
-
-`MetadataProvider` and `MetadataCandidate` define a provider-independent interface. `LocalOnlyProvider` is the default offline implementation. Network providers can be added without coupling the scanner to an external service; candidates carry source and confidence and are never silently applied.
-
-## Configuration
-
-Luna stores a user-level profile under `~/.config/luna/config.json` by default. Configure roots, extensions, ignored paths, worker count, and naming preferences with `luna config`. A project can also pass an explicit profile to the Python API.
-
-## Development
+## Development and CI
 
 ```bash
 pip install -e '.[dev]'
@@ -93,15 +64,11 @@ python -m ruff check src tests
 python -m compileall -q src
 ```
 
-CI runs tests across Python 3.11–3.13, linting, compilation, dependency consistency, and a dependency security audit.
+CI covers Python 3.11–3.13, tests, linting, compilation, dependency consistency, and a dependency security audit. Tagged releases use `scripts/build_release.py` to produce reproducible sdist/wheel artifacts.
 
-## Desktop UI
+## Release
 
-The PySide6 interface is intentionally thin: it reuses the same domain layer and does not bypass confirmation requirements. Install the optional desktop extra and run `luna gui`.
-
-## Recovery
-
-Before write operations, keep a normal backup of the music library. Luna's operation log records rename operations and can be passed to `luna rollback`. Rollback checks that changed files still exist and that original destinations are not occupied before moving anything.
+See `CHANGELOG.md` for the 0.2.0 release. Build locally with `python scripts/build_release.py`; tagged pushes run the release-build workflow.
 
 ## License
 
