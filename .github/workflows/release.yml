@@ -1,0 +1,17 @@
+name: Release build
+on:
+  push:
+    tags: ['v*']
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python scripts/build_release.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: luna-${{ github.ref_name }}
+          path: dist/*
