@@ -1,5 +1,3 @@
-from dataclasses import asdict
-
 def build_report(tracks, validations, duplicate_groups, artwork, rename_plan):
     missing=sum(not track.title or not track.artist or not track.album for track in tracks)
     artwork_missing=sum(not item.has_artwork for item in artwork)
