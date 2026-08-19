@@ -19,7 +19,7 @@ class Track:
     format: str|None=None
     size: int=0
     modified: float=0.0
-    raw_metadata: dict[str, object]|None=None
+    raw_metadata: dict[str,object]|None=None
     metadata_error: str|None=None
 
 def _first(tags,key):
@@ -29,35 +29,31 @@ def _first(tags,key):
     return str(value) if value is not None else None
 
 def _number(value):
-    try: return int(str(value).split("/",1)[0]) if value else None
-    except (ValueError,TypeError): return None
+    try:return int(str(value).split("/",1)[0]) if value else None
+    except (ValueError,TypeError):return None
 
 def _year(value):
     if not value:return None
-    text=str(value)[:4]
-    try:return int(text)
+    try:return int(str(value)[:4])
     except ValueError:return None
 
 def inspect_file(path:Path)->Track:
-    stat=path.stat()
+    try: stat=path.stat()
+    except OSError as exc: return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),metadata_error=str(exc))
     try:
-        audio=File(path, easy=True)
-        tags=audio.tags if audio is not None else None
+        audio=File(path,easy=True); tags=audio.tags if audio is not None else None
         raw={str(k):v for k,v in (tags.items() if hasattr(tags,"items") else [])}
         return Track(path,_first(tags,"title"),_first(tags,"artist"),_first(tags,"album"),_number(_first(tags,"tracknumber")),_first(tags,"albumartist"),_number(_first(tags,"discnumber")),_year(_first(tags,"date") or _first(tags,"year")),_first(tags,"genre"),path.suffix.lower().lstrip("."),stat.st_size,stat.st_mtime,raw)
     except Exception as exc:
         return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error=str(exc))
 
-def scan_library(root:Path, extensions=None, ignored_paths=None, workers=4, on_error=None)->list[Track]:
-    """Recursively scan supported audio files. Files that cannot be parsed are reported, not fatal."""
-    extensions={x.lower() if x.startswith(".") else "."+x.lower() for x in (extensions or AUDIO_EXTENSIONS)}
-    ignored={Path(x).resolve() for x in (ignored_paths or [])}
-    paths=[]
+def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error=None)->list[Track]:
+    extensions={x.lower() if x.startswith(".") else "."+x.lower() for x in (extensions or AUDIO_EXTENSIONS)}; ignored={Path(x).resolve() for x in (ignored_paths or [])}; paths=[]
     for path in sorted(root.rglob("*")):
         try:
-            if path.is_file() and path.suffix.lower() in extensions and not any(parent in ignored for parent in (path.resolve(),*path.resolve().parents)): paths.append(path)
+            resolved=path.resolve()
+            if path.is_file() and path.suffix.lower() in extensions and not any(parent in ignored for parent in (resolved,*resolved.parents)): paths.append(path)
         except OSError as exc:
             if on_error:on_error(path,exc)
-    with ThreadPoolExecutor(max_workers=max(1,workers)) as pool:
-        tracks=list(pool.map(inspect_file,paths))
+    with ThreadPoolExecutor(max_workers=max(1,workers)) as pool: tracks=list(pool.map(inspect_file,paths))
     return sorted(tracks,key=lambda x:str(x.path))
