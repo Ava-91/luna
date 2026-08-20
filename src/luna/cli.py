@@ -45,7 +45,6 @@ def _embed_artwork(path: Path, image_path: Path) -> None:
     if audio is None:
         raise OSError("Audio file could not be parsed.")
 
-    # FLAC/Ogg Opus/FLAC-like containers expose Picture objects.
     if hasattr(audio, "clear_pictures") and hasattr(audio, "add_picture"):
         from mutagen.flac import Picture
 
@@ -59,22 +58,20 @@ def _embed_artwork(path: Path, image_path: Path) -> None:
         audio.save()
         return
 
-    # MP4/M4A uses raw MP4 cover atoms.
-    if hasattr(audio, "tags") and audio.tags is not None and "covr" in audio.tags:
-        from mutagen.mp4 import MP4Cover, MP4
+    if path.suffix.lower() in {".m4a", ".mp4"}:
+        from mutagen.mp4 import MP4Cover
 
-        if not isinstance(audio, MP4):
-            raise ValueError("Unsupported artwork container.")
+        if audio.tags is None:
+            audio.add_tags()
         image_format = MP4Cover.FORMAT_PNG if mime == "image/png" else MP4Cover.FORMAT_JPEG
         audio.tags["covr"] = [MP4Cover(data, imageformat=image_format)]
         audio.save()
         return
 
-    # MP3 uses an ID3 APIC frame.
-    from mutagen.id3 import APIC, ID3
-
     if path.suffix.lower() != ".mp3":
         raise ValueError("Embedded artwork replacement is currently supported for MP3, FLAC, and M4A files.")
+    from mutagen.id3 import APIC, ID3
+
     tags = ID3(path)
     tags.delall("APIC")
     tags.add(APIC(encoding=3, mime=mime, type=3, desc="Cover", data=data))
