@@ -171,13 +171,9 @@ def main(argv=None):
     if not root.is_dir():
         parser.error(f"Not a directory: {root}")
     tracks = load_tracks(root)
-    validations = validate_library(tracks)
-    duplicates = find_duplicates(tracks)
-    probable = find_probable_duplicates(tracks)
-    art = audit_artwork(tracks)
-    renames = build_rename_plan(tracks)
 
     if args.command in {"scan", "inspect"}:
+        validations = validate_library(tracks)
         payload = [{"path": str(t.path), "title": t.title, "artist": t.artist, "album": t.album, "format": t.format, "metadata_error": t.metadata_error, "issues": [i.message for i in v.issues]} for t, v in zip(tracks, validations)]
         if getattr(args, "json", False):
             print(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -188,21 +184,34 @@ def main(argv=None):
                 print(f"  ! {issue}")
         print(f"Found {len(tracks)} audio file(s). Metadata issues: {sum(not v.valid for v in validations)}.")
         return
+
     if args.command == "duplicates":
+        duplicates = find_duplicates(tracks)
+        probable = find_probable_duplicates(tracks)
         payload = {"exact": [{"digest": g.digest, "files": [str(t.path) for t in g.tracks]} for g in duplicates], "probable": [{"confidence": g.confidence, "reasons": list(g.reasons), "files": [str(t.path) for t in g.tracks]} for g in probable]}
         text = json.dumps(payload, ensure_ascii=False, indent=2)
     elif args.command == "artwork":
+        art = audit_artwork(tracks)
         text = json.dumps([x.__dict__ | {"path": str(x.path)} for x in art], default=str, ensure_ascii=False, indent=2)
     elif args.command == "artwork-plan":
         text = json.dumps([{"album": x.album, "album_artist": x.album_artist, "tracks": [str(p) for p in x.tracks], "current": x.current, "candidate": str(x.candidate.source) if x.candidate else None} for x in build_artwork_plan(tracks)], ensure_ascii=False, indent=2)
     elif args.command == "normalize-plan":
         text = json.dumps([x.__dict__ for x in normalization_plan(tracks)], default=str, ensure_ascii=False, indent=2)
     elif args.command == "rename-plan":
+        renames = build_rename_plan(tracks)
         text = json.dumps([{"source": str(x.source), "destination": str(x.destination) if x.destination else None, "status": x.status, "reason": x.reason} for x in renames], ensure_ascii=False, indent=2)
     elif args.command == "report":
+        validations = validate_library(tracks)
+        duplicates = find_duplicates(tracks)
+        art = audit_artwork(tracks)
+        renames = build_rename_plan(tracks)
         payload = build_report(tracks, validations, duplicates, art, renames)
         text = render_report(payload) if args.format == "text" else json.dumps(payload, ensure_ascii=False, indent=2)
     elif args.command == "export":
+        validations = validate_library(tracks)
+        duplicates = find_duplicates(tracks)
+        art = audit_artwork(tracks)
+        renames = build_rename_plan(tracks)
         payload = build_report(tracks, validations, duplicates, art, renames)
         export_json(payload, args.output)
         print(f"Wrote {args.output}")
@@ -220,6 +229,7 @@ def main(argv=None):
             results = apply_metadata_plan(build_metadata_plan(tracks), True, args.log)
             print(json.dumps([{"path": str(item.path), "field": item.field, "success": ok, "error": error} for item, ok, error in results], indent=2))
             return
+        renames = build_rename_plan(tracks)
         results = apply_rename_plan(renames, True, args.log)
         print(json.dumps([{"source": str(r.source), "destination": str(r.destination), "success": r.success, "error": r.error} for r in results], indent=2))
         return
