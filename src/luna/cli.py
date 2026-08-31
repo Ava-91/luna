@@ -1,4 +1,4 @@
-import argparse, json
+import argparse, json, time
 from pathlib import Path
 
 from mutagen import File
@@ -21,6 +21,26 @@ from .backup import OperationLog, rollback
 def load_tracks(path):
     profile = load_config()
     return scan_library(path, profile.extensions, profile.ignored_paths, profile.max_workers)
+
+
+def _benchmark(path):
+    timings = {}
+    start = time.perf_counter()
+    tracks = load_tracks(path)
+    timings["scan"] = time.perf_counter() - start
+    for name, operation in (
+        ("metadata_validation", lambda: validate_library(tracks)),
+        ("exact_duplicates", lambda: find_duplicates(tracks)),
+        ("probable_duplicates", lambda: find_probable_duplicates(tracks)),
+        ("artwork_audit", lambda: audit_artwork(tracks)),
+        ("rename_plan", lambda: build_rename_plan(tracks)),
+        ("normalization_plan", lambda: normalization_plan(tracks)),
+    ):
+        start = time.perf_counter()
+        operation()
+        timings[name] = time.perf_counter() - start
+    timings["total"] = sum(timings.values())
+    return {"tracks": len(tracks), "seconds": timings}
 
 
 def _inside(root: Path, path: Path) -> bool:
@@ -136,6 +156,10 @@ def main(argv=None):
         q.add_argument("--output", type=Path)
         q.add_argument("--format", choices=("text", "json", "markdown"), default="text")
 
+    q = sub.add_parser("benchmark", help="Measure read-only library analysis timings")
+    q.add_argument("path", type=Path)
+    q.add_argument("--json", action="store_true")
+
     q = sub.add_parser("apply", help="Apply a reviewed plan; explicit --confirm required")
     q.add_argument("path", type=Path)
     q.add_argument("--confirm", action="store_true")
@@ -179,6 +203,17 @@ def main(argv=None):
     root = args.path.expanduser().resolve()
     if not root.is_dir():
         parser.error(f"Not a directory: {root}")
+
+    if args.command == "benchmark":
+        payload = _benchmark(root)
+        if args.json:
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            return
+        print(f"Scanned {payload['tracks']} audio file(s).")
+        for name, seconds in payload["seconds"].items():
+            print(f"{name}: {seconds:.6f}s")
+        return
+
     tracks = load_tracks(root)
 
     if args.command in {"scan", "inspect"}:
