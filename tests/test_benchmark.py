@@ -38,7 +38,7 @@ class BenchmarkCommandTests(unittest.TestCase):
              patch.object(cli, "build_rename_plan", return_value=[]), \
              patch.object(cli, "normalization_plan", return_value=[]):
             cli.main(["benchmark", tmp])
-        self.assertEqual(list(__import__("pathlib").Path(tmp).iterdir()), [])
+            self.assertEqual(list(__import__("pathlib").Path(tmp).iterdir()), [])
 
 
 if __name__ == "__main__":
