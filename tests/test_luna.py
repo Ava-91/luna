@@ -1,6 +1,7 @@
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 from luna.scanner import Track, scan_library
 from luna.filenames import sanitize_component
 from luna.normalize import normalize_text, normalize_track_number
@@ -8,6 +9,7 @@ from luna.planner import build_rename_plan, validate_plan
 from luna.duplicates import find_probable_duplicates
 from luna.safety import safe_component
 from luna.config import LibraryProfile, save_config, load_config
+from luna import cli
 
 class LunaTests(unittest.TestCase):
     def test_scanner_is_recursive_and_ignores_unsupported(self):
@@ -30,5 +32,15 @@ class LunaTests(unittest.TestCase):
     def test_profile_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'config.json'; profile=LibraryProfile(['Music'],['.mp3'],['Music/cache'],2); save_config(profile,path); self.assertEqual(load_config(path),profile)
+    def test_scan_skips_unrelated_analysis(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root=Path(tmp)
+            with patch.object(cli, 'load_tracks', return_value=[]), \
+                 patch.object(cli, 'validate_library', side_effect=AssertionError('validation should run for scan')), \
+                 patch.object(cli, 'find_duplicates', side_effect=AssertionError('duplicates should not run for scan')), \
+                 patch.object(cli, 'find_probable_duplicates', side_effect=AssertionError('probable duplicates should not run for scan')), \
+                 patch.object(cli, 'audit_artwork', side_effect=AssertionError('artwork audit should not run for scan')), \
+                 patch.object(cli, 'build_rename_plan', side_effect=AssertionError('rename planning should not run for scan')):
+                cli.main(['scan', str(root)])
 
 if __name__=='__main__': unittest.main()
