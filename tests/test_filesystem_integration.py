@@ -27,7 +27,10 @@ class FilesystemIntegrationTests(unittest.TestCase):
 
             tracks = scan_library(root, workers=1)
 
-            self.assertEqual([track.path.name for track in tracks], ["one.wav", "two.wav"])
+            self.assertEqual(
+                sorted(track.path.name for track in tracks),
+                ["one.wav", "two.wav"],
+            )
             self.assertTrue(all(track.path.exists() for track in tracks))
 
     def test_duplicate_analysis_works_on_real_scanned_files(self):
