@@ -115,6 +115,15 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
     return results
 
 
+def _build_report_payload(tracks):
+    """Build the shared report data used by report and export commands."""
+    validations = validate_library(tracks)
+    duplicates = find_duplicates(tracks)
+    art = audit_artwork(tracks)
+    renames = build_rename_plan(tracks)
+    return build_report(tracks, validations, duplicates, art, renames)
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Luna — local-first music library cleaner")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -201,18 +210,10 @@ def main(argv=None):
         renames = build_rename_plan(tracks)
         text = json.dumps([{"source": str(x.source), "destination": str(x.destination) if x.destination else None, "status": x.status, "reason": x.reason} for x in renames], ensure_ascii=False, indent=2)
     elif args.command == "report":
-        validations = validate_library(tracks)
-        duplicates = find_duplicates(tracks)
-        art = audit_artwork(tracks)
-        renames = build_rename_plan(tracks)
-        payload = build_report(tracks, validations, duplicates, art, renames)
+        payload = _build_report_payload(tracks)
         text = render_report(payload) if args.format == "text" else json.dumps(payload, ensure_ascii=False, indent=2)
     elif args.command == "export":
-        validations = validate_library(tracks)
-        duplicates = find_duplicates(tracks)
-        art = audit_artwork(tracks)
-        renames = build_rename_plan(tracks)
-        payload = build_report(tracks, validations, duplicates, art, renames)
+        payload = _build_report_payload(tracks)
         export_json(payload, args.output)
         print(f"Wrote {args.output}")
         return
