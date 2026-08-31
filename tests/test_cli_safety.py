@@ -40,6 +40,14 @@ class CLISafetyTests(unittest.TestCase):
                 cli.main(["apply", tmp, "--confirm", "--metadata"])
         apply_metadata.assert_called_once()
 
+    def test_confirmed_rollback_dispatches_log(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            log = Path(tmp) / "operations.json"
+            log.write_text("[]", encoding="utf-8")
+            with patch.object(cli, "rollback", return_value=[]) as rollback:
+                cli.main(["rollback", str(log), "--confirm"])
+        rollback.assert_called_once_with(log, True)
+
 
 if __name__ == "__main__":
     unittest.main()
