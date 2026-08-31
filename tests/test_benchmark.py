@@ -1,8 +1,10 @@
 import io
 import json
+import shutil
 import tempfile
 import unittest
 from contextlib import redirect_stdout
+from pathlib import Path
 from unittest.mock import patch
 
 from luna import cli
@@ -30,15 +32,27 @@ class BenchmarkCommandTests(unittest.TestCase):
         self.assertGreaterEqual(payload["seconds"]["total"], 0)
 
     def test_benchmark_is_read_only(self):
-        with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "load_tracks", return_value=[]), \
-             patch.object(cli, "validate_library", return_value=[]), \
-             patch.object(cli, "find_duplicates", return_value=[]), \
-             patch.object(cli, "find_probable_duplicates", return_value=[]), \
-             patch.object(cli, "audit_artwork", return_value=[]), \
-             patch.object(cli, "build_rename_plan", return_value=[]), \
-             patch.object(cli, "normalization_plan", return_value=[]):
-            cli.main(["benchmark", tmp])
-            self.assertEqual(list(__import__("pathlib").Path(tmp).iterdir()), [])
+        tmp = Path(tempfile.mkdtemp())
+        try:
+            sentinel = tmp / "keep.txt"
+            sentinel.write_text("unchanged", encoding="utf-8")
+            before = sentinel.read_bytes()
+
+            with patch.object(cli, "load_tracks", return_value=[]), \
+                 patch.object(cli, "validate_library", return_value=[]), \
+                 patch.object(cli, "find_duplicates", return_value=[]), \
+                 patch.object(cli, "find_probable_duplicates", return_value=[]), \
+                 patch.object(cli, "audit_artwork", return_value=[]), \
+                 patch.object(cli, "build_rename_plan", return_value=[]), \
+                 patch.object(cli, "normalization_plan", return_value=[]):
+                cli.main(["benchmark", tmp])
+
+            self.assertTrue(tmp.is_dir())
+            self.assertTrue(sentinel.is_file())
+            self.assertEqual(sentinel.read_bytes(), before)
+            self.assertEqual([path.name for path in tmp.iterdir()], ["keep.txt"])
+        finally:
+            shutil.rmtree(tmp)
 
 
 if __name__ == "__main__":
