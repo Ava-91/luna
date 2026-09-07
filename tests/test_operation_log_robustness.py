@@ -36,11 +36,8 @@ class OperationLogRobustnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data = [{"action": "artwork", "source": str(root / "a.mp3"), "destination": str(root / "cover.jpg"), "timestamp": "now"}]
-            results = rollback(self._write(root, data), True)
-            self.assertEqual(
-                results,
-                [(False, str(root / "a.mp3"), "Artwork rollback requires a backup created by the current apply workflow.")],
-            )
+            results = rollback(self._write(root, data), True, root)
+            self.assertEqual(results, [(False, str(root / "a.mp3"), "Artwork rollback requires a backup created by the current apply workflow.")])
 
 
 if __name__ == "__main__":
