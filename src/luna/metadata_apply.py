@@ -30,16 +30,14 @@ def apply_metadata_plan(plan, confirm=False, log_path=None):
     results = []
     for item in plan:
         try:
-            # Use Mutagen's easy interface for both reading and writing logical
-            # fields (title, artist, album, etc.). This keeps the writer aligned
-            # with scanner.py, which reads with File(..., easy=True), and avoids
-            # assigning EasyID3 names directly to native ID3 frame mappings.
+            # Keep writes on Mutagen's easy interface, matching scanner.py's
+            # read path and preserving logical field names across formats.
             audio = File(item.path, easy=True)
             if audio is None:
                 raise OSError("Audio file could not be parsed.")
             if audio.tags is None:
                 audio.add_tags()
-            audio[item.field] = [item.new]
+            audio.tags[item.field] = [item.new]
             audio.save()
             if log:
                 log.record_metadata(item.path, item.field, item.old, item.new)

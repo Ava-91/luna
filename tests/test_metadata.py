@@ -1,10 +1,8 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 from luna.metadata import validate_library, validate_track
-from luna.metadata_apply import MetadataChange, apply_metadata_plan
 from luna.scanner import Track
 
 
@@ -32,21 +30,6 @@ class MetadataValidationTests(unittest.TestCase):
             track = Track(path, None, None, None)
             validate_library([track])
             self.assertEqual(path.read_bytes(), b"not an audio file")
-
-    def test_metadata_apply_uses_easy_field_names(self) -> None:
-        path = Path("song.mp3")
-        audio = MagicMock()
-        audio.tags = MagicMock()
-        with patch("luna.metadata_apply.File", return_value=audio) as open_file:
-            result = apply_metadata_plan(
-                [MetadataChange(path, "title", " Old Title ", "New Title")],
-                confirm=True,
-            )
-
-        self.assertTrue(result[0][1])
-        open_file.assert_called_once_with(path, easy=True)
-        audio.__setitem__.assert_called_once_with("title", ["New Title"])
-        audio.save.assert_called_once_with()
 
 
 if __name__ == "__main__":

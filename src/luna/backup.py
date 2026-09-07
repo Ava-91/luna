@@ -75,21 +75,16 @@ def rollback(log_path: Path, confirm=False):
                 from mutagen import File
 
                 path = Path(op["source"])
-                # Roll back through the same easy metadata interface used by
-                # metadata_apply.py. Logical field names therefore map to the
-                # correct format-specific storage representation.
+                # Use the same easy metadata interface as metadata_apply.py.
                 audio = File(path, easy=True)
                 if audio is None:
                     raise OSError("Audio file could not be parsed.")
                 if audio.tags is None:
                     audio.add_tags()
                 if op["old_value"] is None:
-                    try:
-                        del audio[op["field"]]
-                    except KeyError:
-                        pass
+                    audio.tags.pop(op["field"], None)
                 else:
-                    audio[op["field"]] = [op["old_value"]]
+                    audio.tags[op["field"]] = [op["old_value"]]
                 audio.save()
                 results.append((True, str(path), op["field"]))
             except Exception as exc:
