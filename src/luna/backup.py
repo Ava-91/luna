@@ -1,7 +1,8 @@
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 import json
 from datetime import datetime, timezone
+import os
 import shutil
 from uuid import uuid4
 
@@ -19,12 +20,15 @@ class Operation:
     new_value: str | None = None
     backup_path: str | None = None
     library_root: str | None = None
+    status: str = "pending"
 
 
 class OperationLog:
     def __init__(self, path: Path, library_root: Path | None = None):
         self.path = path
         self.library_root = library_root.expanduser().resolve() if library_root else None
+        self.transaction_id = uuid4().hex
+        self.state = "prepared"
         self.operations = []
 
     def record(self, action, source, destination, field=None, old_value=None, new_value=None, backup_path=None):
@@ -41,28 +45,69 @@ class OperationLog:
                 str(self.library_root) if self.library_root else None,
             )
         )
+        return len(self.operations) - 1
 
     def record_metadata(self, path, field, old_value, new_value):
-        self.record("metadata", path, path, field, old_value, new_value)
+        return self.record("metadata", path, path, field, old_value, new_value)
 
     def record_artwork(self, path, candidate, backup_path):
-        self.record("artwork", path, candidate, backup_path=backup_path)
+        return self.record("artwork", path, candidate, backup_path=backup_path)
+
+    def mark_completed(self, index):
+        self.operations[index] = replace(self.operations[index], status="completed")
+        self.save()
+
+    def finalize(self):
+        self.state = "committed"
+        self.save()
+
+    def abort(self):
+        self.state = "rolled_back"
+        self.save()
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(
-            json.dumps([asdict(x) for x in self.operations], indent=2, ensure_ascii=False),
-            encoding="utf-8",
-        )
+        payload = {
+            "version": 2,
+            "transaction_id": self.transaction_id,
+            "state": self.state,
+            "library_root": str(self.library_root) if self.library_root else None,
+            "operations": [asdict(x) for x in self.operations],
+        }
+        temporary = self.path.with_name(f".{self.path.name}.tmp-{uuid4().hex}")
+        data = json.dumps(payload, indent=2, ensure_ascii=False).encode("utf-8")
+        try:
+            with temporary.open("wb") as handle:
+                handle.write(data)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            try:
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+        finally:
+            if temporary.exists():
+                temporary.unlink()
 
 
-def _load_operations(log_path: Path):
+def _load_log(log_path: Path):
     data = json.loads(log_path.read_text(encoding="utf-8"))
-    if not isinstance(data, list):
-        raise ValueError("Operation log must contain a JSON array.")
+    if isinstance(data, list):
+        operations = []
+        for op in data:
+            if not isinstance(op, dict):
+                raise ValueError("Invalid operation log entry.")
+            operations.append({**op, "status": "completed"})
+        return {"version": 1, "state": "committed", "library_root": None, "operations": operations}
+    if not isinstance(data, dict) or not isinstance(data.get("operations"), list):
+        raise ValueError("Operation log must contain a JSON array or transaction object.")
     required = {"action", "source", "destination", "timestamp"}
-    operations = []
-    for index, op in enumerate(data):
+    for index, op in enumerate(data["operations"]):
         if not isinstance(op, dict) or not required.issubset(op):
             raise ValueError(f"Invalid operation log entry at index {index}.")
         if op["action"] not in {"rename", "metadata", "artwork"}:
@@ -75,26 +120,35 @@ def _load_operations(log_path: Path):
             raise ValueError(f"Artwork operation at index {index} has an invalid backup path.")
         if op.get("library_root") is not None and not isinstance(op["library_root"], str):
             raise ValueError(f"Invalid library root in operation log entry at index {index}.")
-        operations.append(op)
-    return operations
+        if op.get("status", "pending") not in {"pending", "completed"}:
+            raise ValueError(f"Invalid operation status at index {index}.")
+    return data
 
 
-def _rollback_root(operations, root):
+def _load_operations(log_path: Path):
+    return _load_log(log_path)["operations"]
+
+
+def _rollback_root(log, root):
+    operations = log["operations"]
     if not operations:
         return None
     if root is not None:
         return Path(root).expanduser().resolve()
-    roots = {op.get("library_root") for op in operations}
+    logged_root = log.get("library_root")
+    roots = {op.get("library_root") or logged_root for op in operations}
     if len(roots) != 1 or None in roots:
         raise ValueError("Rollback requires a selected library root or a log created with one.")
     return Path(next(iter(roots))).resolve()
 
 
 def _rollback_rename_group(operations, root):
-    """Restore a complete rename set, staging destinations so cycles are safe."""
+    completed = [op for op in operations if op.get("status", "completed") == "completed"]
+    if not completed:
+        return []
     resolved = []
     current_paths = set()
-    for op in operations:
+    for op in completed:
         current = resolve_mutation_path(root, Path(op["destination"]))
         original = resolve_mutation_path(root, Path(op["source"]))
         resolved.append((op, current, original))
@@ -105,7 +159,7 @@ def _rollback_rename_group(operations, root):
             return [(False, str(current), "Changed file is missing.") for _, current, _ in resolved]
     for _, _, original in resolved:
         if original.exists() and original not in current_paths:
-            return [(False, str(original), "Original destination already exists.") for _, _, _ in resolved]
+            return [(False, str(original), "Original destination already exists.")]
 
     staged = []
     try:
@@ -113,7 +167,6 @@ def _rollback_rename_group(operations, root):
             temporary = current.with_name(f".{current.name}.luna-rollback-{uuid4().hex}")
             current.rename(temporary)
             staged.append((op, current, temporary))
-
         restored = []
         for (op, _, original), (_, _, temporary) in zip(resolved, staged):
             temporary.rename(original)
@@ -137,8 +190,9 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
     if not confirm:
         raise PermissionError("Rollback requires explicit confirmation (confirm=True).")
 
-    operations = _load_operations(log_path)
-    root = _rollback_root(operations, root)
+    log = _load_log(log_path)
+    operations = log["operations"]
+    root = _rollback_root(log, root)
     results = []
     index = len(operations) - 1
     while index >= 0:
@@ -153,11 +207,12 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
             except ValueError as exc:
                 results.extend((False, str(item["destination"]), str(exc)) for item in group)
             continue
-
+        if op.get("status", "completed") != "completed":
+            index -= 1
+            continue
         if op["action"] == "metadata":
             try:
                 from mutagen import File
-
                 path = Path(op["source"])
                 target = resolve_mutation_path(root, path)
                 audio = File(target, easy=True)
@@ -175,7 +230,6 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
                 results.append((False, str(op["source"]), str(exc)))
             index -= 1
             continue
-
         if op["action"] == "artwork":
             backup_path = op.get("backup_path")
             source = Path(op["source"])
