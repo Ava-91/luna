@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from .config import load_config
 from .filenames import suggest_renames
 
 @dataclass(frozen=True)
@@ -10,7 +11,8 @@ class RenamePlanItem:
     reason: str
 
 def build_rename_plan(tracks) -> list[RenamePlanItem]:
-    suggestions = suggest_renames(tracks)
+    template = load_config().filename_template
+    suggestions = suggest_renames(tracks, template)
     return [RenamePlanItem(s.source, s.destination, "change" if s.has_change else ("unchanged" if s.destination else "blocked"), s.reason) for s in suggestions]
 
 def validate_plan(plan: list[RenamePlanItem]) -> list[str]:
