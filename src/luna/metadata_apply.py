@@ -30,7 +30,14 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
         raise ValueError("Applying metadata changes requires the selected library root.")
 
     root = root.expanduser().resolve()
-    log = OperationLog(log_path, root) if log_path else None
+    log = OperationLog(log_path, root) if log_path and plan else None
+    log_indices = {}
+    if log:
+        for item in plan:
+            target = resolve_mutation_path(root, item.path)
+            log_indices[item] = log.record_metadata(target, item.field, item.old, item.new)
+        log.save()
+
     results = []
     for item in plan:
         try:
@@ -43,11 +50,11 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
             audio.tags[item.field] = [item.new]
             audio.save()
             if log:
-                log.record_metadata(target, item.field, item.old, item.new)
+                log.mark_completed(log_indices[item])
             results.append((item, True, None))
         except Exception as exc:
             results.append((item, False, str(exc)))
 
-    if log:
-        log.save()
+    if log and all(ok for _, ok, _ in results):
+        log.finalize()
     return results
