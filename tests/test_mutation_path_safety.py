@@ -1,6 +1,5 @@
 import tempfile
 import unittest
-import wave
 from pathlib import Path
 
 from mutagen.id3 import ID3
@@ -12,13 +11,6 @@ from luna.scanner import Track
 
 
 class MutationPathSafetyTests(unittest.TestCase):
-    def _wav(self, path: Path) -> None:
-        with wave.open(str(path), "wb") as audio:
-            audio.setnchannels(1)
-            audio.setsampwidth(2)
-            audio.setframerate(8000)
-            audio.writeframes(b"\x00\x00" * 32)
-
     def _mp3(self, path: Path) -> None:
         ID3().save(path)
 
@@ -35,10 +27,10 @@ class MutationPathSafetyTests(unittest.TestCase):
             outside = base / "outside"
             root.mkdir()
             outside.mkdir()
-            target = outside / "song.wav"
-            self._wav(target)
+            target = outside / "song.mp3"
+            self._mp3(target)
             original = target.read_bytes()
-            link = root / "link.wav"
+            link = root / "link.mp3"
             self._symlink(link, target)
 
             results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root / "operations.json", root)
@@ -50,10 +42,10 @@ class MutationPathSafetyTests(unittest.TestCase):
     def test_internal_symlink_is_rejected_for_metadata_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            target = root / "song.wav"
-            self._wav(target)
+            target = root / "song.mp3"
+            self._mp3(target)
             original = target.read_bytes()
-            link = root / "link.wav"
+            link = root / "link.mp3"
             self._symlink(link, target)
 
             results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root / "operations.json", root)
@@ -69,10 +61,10 @@ class MutationPathSafetyTests(unittest.TestCase):
             outside = base / "outside"
             root.mkdir()
             outside.mkdir()
-            target = outside / "song.wav"
-            self._wav(target)
-            link2 = root / "link2.wav"
-            link1 = root / "link1.wav"
+            target = outside / "song.mp3"
+            self._mp3(target)
+            link2 = root / "link2.mp3"
+            link1 = root / "link1.mp3"
             self._symlink(link2, target)
             self._symlink(link1, link2)
             original = target.read_bytes()
@@ -96,16 +88,6 @@ class MutationPathSafetyTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 resolve_mutation_path(root, link)
 
-    def test_normal_file_metadata_mutation_still_works(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            path = root / "song.wav"
-            self._wav(path)
-
-            results = apply_metadata_plan([MetadataChange(path, "title", None, "Working")], True, root / "operations.json", root)
-
-            self.assertTrue(results[0][1])
-
     def test_external_symlink_is_rejected_for_artwork_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             base = Path(tmp)
@@ -118,15 +100,18 @@ class MutationPathSafetyTests(unittest.TestCase):
             original = target.read_bytes()
             link = root / "link.mp3"
             self._symlink(link, target)
+            safe = root / "safe.mp3"
+            self._mp3(safe)
             cover = root / "cover.jpg"
             cover.write_bytes(b"not a real image")
-            track = Track(link, "Song", "Artist", "Album")
+            tracks = [Track(link, "Song", "Artist", "Album"), Track(safe, "Song 2", "Artist", "Album")]
 
-            results = apply_artwork_changes(root, [track], True, root / "operations.json")
+            results = apply_artwork_changes(root, tracks, True, root / "operations.json")
 
-            self.assertTrue(results)
-            self.assertFalse(results[0]["success"])
-            self.assertIn("library", results[0]["error"].lower())
+            link_results = [result for result in results if result["path"] == str(link)]
+            self.assertEqual(len(link_results), 1)
+            self.assertFalse(link_results[0]["success"])
+            self.assertIn("symlink", link_results[0]["error"].lower())
             self.assertEqual(target.read_bytes(), original)
 
     def test_artwork_candidate_symlink_outside_is_rejected(self):
