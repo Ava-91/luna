@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 from datetime import datetime, timezone
 import shutil
+from uuid import uuid4
 
 from .paths import resolve_mutation_path
 
@@ -89,6 +90,49 @@ def _rollback_root(operations, root):
     return Path(next(iter(roots))).resolve()
 
 
+def _rollback_rename_group(operations, root):
+    """Restore a complete rename set, staging destinations so cycles are safe."""
+    resolved = []
+    current_paths = set()
+    for op in operations:
+        current = resolve_mutation_path(root, Path(op["destination"]))
+        original = resolve_mutation_path(root, Path(op["source"]))
+        resolved.append((op, current, original))
+        current_paths.add(current)
+
+    for _, current, _ in resolved:
+        if not current.exists():
+            return [(False, str(current), "Changed file is missing.") for _, current, _ in resolved]
+    for _, _, original in resolved:
+        if original.exists() and original not in current_paths:
+            return [(False, str(original), "Original destination already exists.") for _, _, _ in resolved]
+
+    staged = []
+    try:
+        for op, current, _ in resolved:
+            temporary = current.with_name(f".{current.name}.luna-rollback-{uuid4().hex}")
+            current.rename(temporary)
+            staged.append((op, current, temporary))
+
+        restored = []
+        for (op, _, original), (_, _, temporary) in zip(resolved, staged):
+            temporary.rename(original)
+            restored.append((True, str(Path(op["destination"])), str(Path(op["source"]))))
+        return list(reversed(restored))
+    except OSError as exc:
+        recovery_errors = []
+        for _, current, temporary in reversed(staged):
+            if temporary.exists():
+                try:
+                    temporary.rename(current)
+                except OSError as recovery_exc:
+                    recovery_errors.append(f"{temporary} -> {current}: {recovery_exc}")
+        detail = f": {exc}"
+        if recovery_errors:
+            detail += "; recovery incomplete: " + "; ".join(recovery_errors)
+        return [(False, str(op["destination"]), f"Rename rollback failed{detail}") for op in operations]
+
+
 def rollback(log_path: Path, confirm=False, root: Path | None = None):
     if not confirm:
         raise PermissionError("Rollback requires explicit confirmation (confirm=True).")
@@ -96,7 +140,20 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
     operations = _load_operations(log_path)
     root = _rollback_root(operations, root)
     results = []
-    for op in reversed(operations):
+    index = len(operations) - 1
+    while index >= 0:
+        op = operations[index]
+        if op["action"] == "rename":
+            end = index
+            while index >= 0 and operations[index]["action"] == "rename":
+                index -= 1
+            group = operations[index + 1 : end + 1]
+            try:
+                results.extend(_rollback_rename_group(group, root))
+            except ValueError as exc:
+                results.extend((False, str(item["destination"]), str(exc)) for item in group)
+            continue
+
         if op["action"] == "metadata":
             try:
                 from mutagen import File
@@ -116,6 +173,7 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
                 results.append((True, str(path), op["field"]))
             except Exception as exc:
                 results.append((False, str(op["source"]), str(exc)))
+            index -= 1
             continue
 
         if op["action"] == "artwork":
@@ -123,10 +181,12 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
             source = Path(op["source"])
             if not backup_path:
                 results.append((False, str(source), "Artwork rollback requires a backup created by the current apply workflow."))
+                index -= 1
                 continue
             backup = Path(backup_path)
             if not backup.is_file():
                 results.append((False, str(source), "Artwork backup is missing."))
+                index -= 1
                 continue
             try:
                 target = resolve_mutation_path(root, source)
@@ -135,25 +195,6 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
                 results.append((True, str(source), str(backup)))
             except (OSError, ValueError) as exc:
                 results.append((False, str(source), str(exc)))
+            index -= 1
             continue
-
-        try:
-            src = Path(op["destination"])
-            dst = Path(op["source"])
-            resolved_src = resolve_mutation_path(root, src)
-            resolved_dst = resolve_mutation_path(root, dst)
-        except ValueError as exc:
-            results.append((False, str(op["destination"]), str(exc)))
-            continue
-        if not resolved_src.exists():
-            results.append((False, str(src), "Changed file is missing."))
-            continue
-        if resolved_dst.exists():
-            results.append((False, str(src), "Original destination already exists."))
-            continue
-        try:
-            resolved_src.rename(resolved_dst)
-            results.append((True, str(src), str(dst)))
-        except OSError as exc:
-            results.append((False, str(src), str(exc)))
     return results
