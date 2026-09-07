@@ -10,6 +10,7 @@ _WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 1
 # treated separately: they are cosmetic and should not create extra separators.
 _INVALID_CHARS = re.compile(r'[<>:/\\|?*\x00-\x1f]')
 _QUOTES = re.compile(r'[\"]')
+DEFAULT_FILENAME_TEMPLATE = "{track} - {artist} - {title}"
 
 
 @dataclass(frozen=True)
@@ -35,23 +36,41 @@ def sanitize_component(value: str, fallback: str = "Unknown") -> str:
     return value[:180].rstrip(" .") or fallback
 
 
-def suggested_filename(track: Track) -> str | None:
+def suggested_filename(track: Track, template: str = DEFAULT_FILENAME_TEMPLATE) -> str | None:
     if not track.title or not track.artist:
         return None
-    artist = sanitize_component(track.artist)
-    title = sanitize_component(track.title)
-    prefix = f"{track.track_number:02d} - " if track.track_number is not None else ""
-    return f"{prefix}{artist} - {title}{track.path.suffix.lower()}"
+
+    values = {
+        "track": f"{track.track_number:02d}" if track.track_number is not None else "",
+        "artist": track.artist,
+        "title": track.title,
+        "album": track.album or "",
+        "album_artist": track.album_artist or "",
+        "disc": f"{track.disc_number:02d}" if track.disc_number is not None else "",
+        "year": str(track.year) if track.year is not None else "",
+        "genre": track.genre or "",
+        "format": track.format or track.path.suffix.lower().lstrip("."),
+    }
+    try:
+        if template == DEFAULT_FILENAME_TEMPLATE and not values["track"]:
+            rendered = "{artist} - {title}".format_map(values)
+        else:
+            rendered = template.format_map(values)
+    except (KeyError, ValueError) as exc:
+        raise ValueError(f"Invalid filename template: {exc}") from exc
+
+    rendered = sanitize_component(rendered)
+    return f"{rendered}{track.path.suffix.lower()}"
 
 
-def suggest_renames(tracks: list[Track]) -> list[RenameSuggestion]:
+def suggest_renames(tracks: list[Track], template: str = DEFAULT_FILENAME_TEMPLATE) -> list[RenameSuggestion]:
     """Create collision-aware rename previews; never rename files."""
     suggestions: list[RenameSuggestion] = []
     planned: set[Path] = set()
     existing = {track.path.resolve() for track in tracks}
 
     for track in sorted(tracks, key=lambda item: str(item.path)):
-        filename = suggested_filename(track)
+        filename = suggested_filename(track, template)
         if filename is None:
             suggestions.append(RenameSuggestion(track.path, None, "Missing title or artist metadata."))
             continue
