@@ -22,7 +22,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             changed = root / "new.mp3"
             changed.write_bytes(b"audio")
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record("rename", original, changed)
             log.save()
 
@@ -42,7 +42,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             first_changed.write_bytes(b"one")
             second_changed.write_bytes(b"two")
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record("rename", first, first_changed)
             log.record("rename", second, second_changed)
             log.save()
@@ -60,7 +60,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             original.write_bytes(b"original")
             changed.write_bytes(b"changed")
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record("rename", original, changed)
             log.save()
 
@@ -76,7 +76,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             original = root / "old.mp3"
             changed = root / "new.mp3"
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record("rename", original, changed)
             log.save()
 
@@ -99,7 +99,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             audio_path.write_bytes(b"audio")
             fake_audio = FakeAudio()
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record_metadata(audio_path, "title", "old title", "new title")
             log.save()
 
@@ -119,7 +119,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             backup.parent.mkdir()
             backup.write_bytes(b"original audio with original artwork")
 
-            log = OperationLog(root / "operations.json")
+            log = OperationLog(root / "operations.json", root)
             log.record_artwork(source, root / "cover.jpg", backup)
             log.save()
 
@@ -128,11 +128,11 @@ class OperationLogSafetyTests(unittest.TestCase):
             self.assertEqual(results, [(True, str(source), str(backup))])
             self.assertEqual(source.read_bytes(), b"original audio with original artwork")
 
-    def test_saved_log_contains_all_operation_fields(self):
+    def test_saved_log_contains_library_root(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             log_path = root / "operations.json"
-            log = OperationLog(log_path)
+            log = OperationLog(log_path, root)
             log.record_metadata(root / "song.mp3", "title", "old", "new")
             log.save()
 
@@ -140,11 +140,53 @@ class OperationLogSafetyTests(unittest.TestCase):
 
             self.assertEqual(len(data), 1)
             self.assertEqual(data[0]["action"], "metadata")
-            self.assertEqual(data[0]["field"], "title")
-            self.assertEqual(data[0]["old_value"], "old")
-            self.assertEqual(data[0]["new_value"], "new")
-            self.assertIsNone(data[0]["backup_path"])
-            self.assertIn("timestamp", data[0])
+            self.assertEqual(data[0]["library_root"], str(root.resolve()))
+
+    def test_rollback_rejects_external_symlink_target(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "library"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            external = outside / "important.mp3"
+            external.write_bytes(b"important")
+            changed = root / "link.mp3"
+            original = root / "original.mp3"
+            original.write_bytes(b"original")
+            try:
+                changed.symlink_to(external)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            log = OperationLog(root / "operations.json", root)
+            log.record("rename", original, changed)
+            log.save()
+
+            results = rollback(log.path, True)
+
+            self.assertFalse(results[0][0])
+            self.assertIn("symlink", results[0][2].lower())
+            self.assertEqual(external.read_bytes(), b"important")
+
+    def test_legacy_log_requires_explicit_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            changed = root / "new.mp3"
+            changed.write_bytes(b"audio")
+            log_path = root / "operations.json"
+            log_path.write_text(json.dumps([{
+                "action": "rename",
+                "source": str(root / "old.mp3"),
+                "destination": str(changed),
+                "timestamp": "2026-01-01T00:00:00+00:00",
+            }]), encoding="utf-8")
+
+            with self.assertRaises(ValueError):
+                rollback(log_path, True)
+            results = rollback(log_path, True, root)
+            self.assertFalse(results[0][0])
+            self.assertIn("original destination", results[0][2].lower())
 
 
 if __name__ == "__main__":
