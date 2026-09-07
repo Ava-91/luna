@@ -113,24 +113,23 @@ def find_probable_duplicates(tracks):
         remaining = list(sorted(items, key=lambda x: str(x.path)))
         while len(remaining) >= 2:
             representative = remaining.pop(0)
-            matches = []
-            match_scores = []
-            match_reasons = []
-            for candidate in remaining:
-                score, reasons = probable_duplicate_score(representative, candidate)
-                if score >= 0.60:
-                    matches.append(candidate)
-                    match_scores.append(score)
-                    match_reasons.append(reasons)
+            scored = [
+                (candidate, *probable_duplicate_score(representative, candidate))
+                for candidate in remaining
+            ]
+            qualifying = [(candidate, score, reasons) for candidate, score, reasons in scored if score >= 0.60]
+            if not qualifying:
+                continue
 
-            if matches:
-                group = (representative, *matches)
-                confidence = min(match_scores)
-                reasons = _group_reasons(match_reasons)
-                if len({track.path.suffix.lower() for track in group}) > 1:
-                    reasons = reasons + ("different file formats",)
-                results.append(ProbableDuplicate(tuple(group), confidence, reasons))
-                matched = set(matches)
-                remaining = [track for track in remaining if track not in matched]
+            group_threshold = max(score for _, score, _ in qualifying)
+            matches = [(candidate, score, reasons) for candidate, score, reasons in qualifying if score >= group_threshold]
+            group = (representative, *(candidate for candidate, _, _ in matches))
+            confidence = group_threshold
+            reasons = _group_reasons([reasons for _, _, reasons in matches])
+            if len({track.path.suffix.lower() for track in group}) > 1:
+                reasons = reasons + ("different file formats",)
+            results.append(ProbableDuplicate(tuple(group), confidence, reasons))
+            matched = {candidate for candidate, _, _ in matches}
+            remaining = [track for track in remaining if track not in matched]
 
     return sorted(results, key=lambda x: tuple(str(t.path) for t in x.tracks))
