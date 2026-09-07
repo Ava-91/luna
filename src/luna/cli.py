@@ -113,6 +113,7 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
         backup_dir = log_path.with_name(log_path.stem + "-backups")
         backup_dir.mkdir(parents=True, exist_ok=True)
 
+    prepared = []
     results = []
     for change in plan:
         candidate = change.candidate
@@ -127,23 +128,34 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
                 results.append({"path": str(path), "success": False, "error": "Artwork candidate is outside the selected library."})
             continue
         for path in change.tracks:
-            backup_path = None
             try:
                 target = resolve_mutation_path(root, path)
+                backup_path = None
+                log_index = None
                 if log:
                     digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
                     backup_path = backup_dir / f"{digest}.bak"
                     shutil.copy2(target, backup_path)
-                _embed_artwork(target, candidate_source)
-                if log:
-                    log.record_artwork(target, candidate_source, backup_path)
-                results.append({"path": str(path), "source": str(candidate_source), "success": True, "error": None, "backup": str(backup_path) if backup_path else None})
+                    log_index = log.record_artwork(target, candidate_source, backup_path)
+                prepared.append((path, target, candidate_source, backup_path, log_index))
             except Exception as exc:
-                if backup_path and backup_path.exists():
-                    backup_path.unlink()
                 results.append({"path": str(path), "source": str(candidate.source), "success": False, "error": str(exc)})
-    if log:
+
+    if log and prepared:
         log.save()
+
+    for path, target, candidate_source, backup_path, log_index in prepared:
+        try:
+            _embed_artwork(target, candidate_source)
+            if log:
+                log.mark_completed(log_index)
+            results.append({"path": str(path), "source": str(candidate_source), "success": True, "error": None, "backup": str(backup_path) if backup_path else None})
+        except Exception as exc:
+            results.append({"path": str(path), "source": str(candidate_source), "success": False, "error": str(exc), "backup": str(backup_path) if backup_path else None})
+
+    prepared_paths = {str(path) for path, *_ in prepared}
+    if log and prepared and all(row["success"] for row in results if row["path"] in prepared_paths):
+        log.finalize()
     return results
 
 
