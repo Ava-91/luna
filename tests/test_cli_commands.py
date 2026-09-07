@@ -13,6 +13,34 @@ class CLICommandContractTests(unittest.TestCase):
         with redirect_stdout(io.StringIO()):
             cli.main([command, str(root), *extra])
 
+    def test_scan_discovers_tracks_without_running_validation(self):
+        tracks = []
+        with patch.object(cli, "load_tracks", return_value=tracks), patch.object(cli, "validate_library") as validate:
+            with tempfile.TemporaryDirectory() as tmp:
+                self._run_with_root("scan", tmp)
+
+        validate.assert_not_called()
+
+    def test_scan_json_contains_discovery_fields_only(self):
+        track = type("Track", (), {"path": Path("song.mp3"), "title": "Song", "artist": "Artist", "album": "Album", "format": "mp3", "metadata_error": None})()
+        with patch.object(cli, "load_tracks", return_value=[track]), patch.object(cli, "validate_library") as validate:
+            output = io.StringIO()
+            with tempfile.TemporaryDirectory() as tmp, redirect_stdout(output):
+                cli.main(["scan", tmp, "--json"])
+
+        row = __import__("json").loads(output.getvalue())[0]
+        self.assertEqual(row["title"], "Song")
+        self.assertNotIn("issues", row)
+        validate.assert_not_called()
+
+    def test_inspect_runs_metadata_validation(self):
+        validations = []
+        with patch.object(cli, "load_tracks", return_value=[]), patch.object(cli, "validate_library", return_value=validations) as validate:
+            with tempfile.TemporaryDirectory() as tmp:
+                self._run_with_root("inspect", tmp)
+
+        validate.assert_called_once_with([])
+
     def test_duplicates_dispatches_duplicate_analysis_only(self):
         with patch.object(cli, "load_tracks", return_value=[]), \
              patch.object(cli, "find_duplicates", return_value=[]) as find_exact, \
