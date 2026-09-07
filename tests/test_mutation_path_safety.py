@@ -33,7 +33,7 @@ class MutationPathSafetyTests(unittest.TestCase):
             link = root / "link.mp3"
             self._symlink(link, target)
 
-            results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root=root / "operations.json", root=root)
+            results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root / "operations.json", root)
 
             self.assertFalse(results[0][1])
             self.assertIn("symlink", results[0][2].lower())
@@ -48,7 +48,7 @@ class MutationPathSafetyTests(unittest.TestCase):
             link = root / "link.mp3"
             self._symlink(link, target)
 
-            results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root=root / "operations.json", root=root)
+            results = apply_metadata_plan([MetadataChange(link, "title", None, "blocked")], True, root / "operations.json", root)
 
             self.assertFalse(results[0][1])
             self.assertIn("symlink", results[0][2].lower())
@@ -69,7 +69,7 @@ class MutationPathSafetyTests(unittest.TestCase):
             self._symlink(link1, link2)
             original = target.read_bytes()
 
-            results = apply_metadata_plan([MetadataChange(link1, "title", None, "blocked")], True, root=root / "operations.json", root=root)
+            results = apply_metadata_plan([MetadataChange(link1, "title", None, "blocked")], True, root / "operations.json", root)
 
             self.assertFalse(results[0][1])
             self.assertIn("symlink", results[0][2].lower())
@@ -94,7 +94,7 @@ class MutationPathSafetyTests(unittest.TestCase):
             path = root / "song.mp3"
             self._mp3(path)
 
-            results = apply_metadata_plan([MetadataChange(path, "title", None, "Working")], True, root=root / "operations.json", root=root)
+            results = apply_metadata_plan([MetadataChange(path, "title", None, "Working")], True, root / "operations.json", root)
 
             self.assertTrue(results[0][1])
             self.assertEqual(ID3(path).getall("TIT2")[0].text, ["Working"])
