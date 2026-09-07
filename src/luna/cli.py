@@ -1,4 +1,4 @@
-import argparse, json, time
+import argparse, json, time, hashlib, shutil
 from pathlib import Path
 
 from mutagen import File
@@ -111,6 +111,11 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
 
     plan = build_artwork_plan(tracks, candidates)
     log = OperationLog(log_path) if log_path else None
+    backup_dir = None
+    if log:
+        backup_dir = log_path.with_name(log_path.stem + "-backups")
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
     results = []
     for change in plan:
         candidate = change.candidate
@@ -123,12 +128,19 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
                 results.append({"path": str(path), "success": False, "error": "Artwork candidate is outside the selected library."})
             continue
         for path in change.tracks:
+            backup_path = None
             try:
+                if log:
+                    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
+                    backup_path = backup_dir / f"{digest}.bak"
+                    shutil.copy2(path, backup_path)
                 _embed_artwork(path, candidate.source)
                 if log:
-                    log.record("artwork", path, candidate.source)
-                results.append({"path": str(path), "source": str(candidate.source), "success": True, "error": None})
+                    log.record_artwork(path, candidate.source, backup_path)
+                results.append({"path": str(path), "source": str(candidate.source), "success": True, "error": None, "backup": str(backup_path) if backup_path else None})
             except Exception as exc:
+                if backup_path and backup_path.exists():
+                    backup_path.unlink()
                 results.append({"path": str(path), "source": str(candidate.source), "success": False, "error": str(exc)})
     if log:
         log.save()
