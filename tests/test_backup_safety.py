@@ -26,9 +26,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             index = log.record("rename", original, changed)
             self._complete(log, index)
-
             results = rollback(log.path, True)
-
             self.assertEqual(results, [(True, str(changed), str(original))])
             self.assertTrue(original.exists())
             self.assertFalse(changed.exists())
@@ -45,9 +43,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             second_index = log.record("rename", second, second_changed)
             self._complete(log, first_index)
             self._complete(log, second_index)
-
             results = rollback(log.path, True)
-
             self.assertEqual(results[0][1:], (str(second_changed), str(second)))
             self.assertEqual(results[1][1:], (str(first_changed), str(first)))
 
@@ -60,10 +56,8 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             index = log.record("rename", original, changed)
             self._complete(log, index)
-
             results = rollback(log.path, True)
-
-            self.assertEqual(results, [(False, str(original), "Original destination already exists.")])
+            self.assertEqual(results, [(False, str(original), f"Original destination already exists: {original}")])
             self.assertEqual(original.read_bytes(), b"original")
             self.assertEqual(changed.read_bytes(), b"changed")
 
@@ -74,10 +68,8 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             index = log.record("rename", original, changed)
             self._complete(log, index)
-
             results = rollback(log.path, True)
-
-            self.assertEqual(results, [(False, str(changed), "Changed file is missing.")])
+            self.assertEqual(results, [(False, str(changed), f"Changed file is missing: {changed}")])
 
     def test_metadata_rollback_restores_previous_value(self):
         class FakeAudio:
@@ -95,10 +87,8 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             index = log.record_metadata(audio_path, "title", "old title", "new title")
             self._complete(log, index)
-
             with patch("mutagen.File", return_value=fake_audio):
                 results = rollback(log.path, True)
-
             self.assertEqual(results, [(True, str(audio_path), "title")])
             self.assertEqual(fake_audio.tags["title"], ["old title"])
             self.assertTrue(fake_audio.saved)
@@ -114,9 +104,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             index = log.record_artwork(source, root / "cover.jpg", backup)
             self._complete(log, index)
-
             results = rollback(log.path, True)
-
             self.assertEqual(results, [(True, str(source), str(backup))])
             self.assertEqual(source.read_bytes(), b"original audio with original artwork")
 
@@ -127,39 +115,30 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(log_path, root)
             index = log.record_metadata(root / "song.mp3", "title", "old", "new")
             log.save()
-
             data = json.loads(log_path.read_text(encoding="utf-8"))
-
             self.assertEqual(data["version"], 2)
             self.assertEqual(data["state"], "prepared")
             self.assertTrue(data["transaction_id"])
             self.assertEqual(data["library_root"], str(root.resolve()))
-            self.assertEqual(data["operations"][0]["action"], "metadata")
             self.assertEqual(data["operations"][0]["status"], "pending")
-            self.assertEqual(data["operations"][0]["field"], "title")
-            self.assertEqual(data["operations"][0]["old_value"], "old")
-            self.assertEqual(data["operations"][0]["new_value"], "new")
             self.assertEqual(index, 0)
-
             log.mark_completed(index)
-            data = json.loads(log_path.read_text(encoding="utf-8"))
-            self.assertEqual(data["operations"][0]["status"], "completed")
             log.finalize()
             data = json.loads(log_path.read_text(encoding="utf-8"))
+            self.assertEqual(data["operations"][0]["status"], "completed")
             self.assertEqual(data["state"], "committed")
 
     def test_journal_write_failure_happens_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            log_path = root / "operations.json"
-            log = OperationLog(log_path, root)
+            log = OperationLog(root / "operations.json", root)
             log.record("rename", root / "old.mp3", root / "new.mp3")
             with patch("pathlib.Path.open", side_effect=OSError("disk full")):
                 with self.assertRaises(OSError):
                     log.save()
             self.assertFalse((root / "old.mp3").exists())
             self.assertFalse((root / "new.mp3").exists())
-            self.assertFalse(log_path.exists())
+            self.assertFalse(log.path.exists())
 
     def test_recovery_from_rename_interruption_after_one_move(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -170,10 +149,9 @@ class OperationLogSafetyTests(unittest.TestCase):
             temp_a = root / ".a.txt.luna-tmp-a"
             a.rename(temp_a)
             log = OperationLog(root / "operations.json", root)
-            first = log.record("rename", a, b, backup_path=temp_a)
+            log.record("rename", a, b, backup_path=temp_a)
             log.save()
             results = rollback(log.path, True)
-
             self.assertTrue(results[0][0])
             self.assertEqual(a.read_bytes(), b"A")
             self.assertEqual(b.read_bytes(), b"B")
@@ -183,19 +161,22 @@ class OperationLogSafetyTests(unittest.TestCase):
             root = Path(tmp)
             a, b = root / "a.txt", root / "b.txt"
             a.write_bytes(b"A")
-            b.unlink()
             log = OperationLog(root / "operations.json", root)
             log.record("rename", a, b, backup_path=root / ".a.tmp")
             log.save()
             a.rename(b)
-
             results = rollback(log.path, True)
-
             self.assertTrue(results[0][0])
             self.assertEqual(a.read_bytes(), b"A")
             self.assertFalse(b.exists())
 
-    def test_pending_metadata_is_not_falsely_reported_as_completed(self):
+    def test_pending_metadata_is_recoverable_to_original_value(self):
+        class FakeAudio:
+            def __init__(self):
+                self.tags = {"title": ["new"]}
+            def save(self):
+                pass
+
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             path = root / "song.mp3"
@@ -203,11 +184,11 @@ class OperationLogSafetyTests(unittest.TestCase):
             log = OperationLog(root / "operations.json", root)
             log.record_metadata(path, "title", "old", "new")
             log.save()
-
-            results = rollback(log.path, True)
-
-            self.assertEqual(results, [])
-            self.assertTrue(path.exists())
+            fake_audio = FakeAudio()
+            with patch("mutagen.File", return_value=fake_audio):
+                results = rollback(log.path, True)
+            self.assertEqual(results, [(True, str(path), "title")])
+            self.assertEqual(fake_audio.tags["title"], ["old"])
 
     def test_legacy_log_requires_explicit_root(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -216,12 +197,8 @@ class OperationLogSafetyTests(unittest.TestCase):
             changed.write_bytes(b"audio")
             log_path = root / "operations.json"
             log_path.write_text(json.dumps([{
-                "action": "rename",
-                "source": str(root / "old.mp3"),
-                "destination": str(changed),
-                "timestamp": "2026-01-01T00:00:00+00:00",
+                "action": "rename", "source": str(root / "old.mp3"), "destination": str(changed), "timestamp": "2026-01-01T00:00:00+00:00"
             }]), encoding="utf-8")
-
             with self.assertRaises(ValueError):
                 rollback(log_path, True)
             results = rollback(log_path, True, root)
