@@ -3,6 +3,7 @@ from pathlib import Path
 import json
 from datetime import datetime, timezone
 
+
 @dataclass(frozen=True)
 class Operation:
     action: str
@@ -20,14 +21,27 @@ class OperationLog:
         self.operations = []
 
     def record(self, action, source, destination, field=None, old_value=None, new_value=None):
-        self.operations.append(Operation(action, str(source), str(destination), datetime.now(timezone.utc).isoformat(), field, old_value, new_value))
+        self.operations.append(
+            Operation(
+                action,
+                str(source),
+                str(destination),
+                datetime.now(timezone.utc).isoformat(),
+                field,
+                old_value,
+                new_value,
+            )
+        )
 
     def record_metadata(self, path, field, old_value, new_value):
         self.record("metadata", path, path, field, old_value, new_value)
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps([asdict(x) for x in self.operations], indent=2, ensure_ascii=False), encoding="utf-8")
+        self.path.write_text(
+            json.dumps([asdict(x) for x in self.operations], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
 
 
 def _load_operations(log_path: Path):
@@ -52,30 +66,40 @@ def _load_operations(log_path: Path):
 def rollback(log_path: Path, confirm=False):
     if not confirm:
         raise PermissionError("Rollback requires explicit confirmation (confirm=True).")
+
     operations = _load_operations(log_path)
     results = []
     for op in reversed(operations):
         if op["action"] == "metadata":
             try:
                 from mutagen import File
+
                 path = Path(op["source"])
-                audio = File(path)
+                # Roll back through the same easy metadata interface used by
+                # metadata_apply.py. Logical field names therefore map to the
+                # correct format-specific storage representation.
+                audio = File(path, easy=True)
                 if audio is None:
                     raise OSError("Audio file could not be parsed.")
                 if audio.tags is None:
                     audio.add_tags()
                 if op["old_value"] is None:
-                    audio.tags.pop(op["field"], None)
+                    try:
+                        del audio[op["field"]]
+                    except KeyError:
+                        pass
                 else:
-                    audio.tags[op["field"]] = [op["old_value"]]
+                    audio[op["field"]] = [op["old_value"]]
                 audio.save()
                 results.append((True, str(path), op["field"]))
             except Exception as exc:
                 results.append((False, str(op["source"]), str(exc)))
             continue
+
         if op["action"] == "artwork":
             results.append((False, str(op["source"]), "Artwork rollback is not supported."))
             continue
+
         src = Path(op["destination"])
         dst = Path(op["source"])
         if not src.exists():
