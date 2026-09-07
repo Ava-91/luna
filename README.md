@@ -38,6 +38,8 @@ luna config show|set|reset
 luna gui
 ```
 
+`scan` discovers supported audio files and prints their basic metadata without running metadata validation. `inspect` performs metadata validation and reports validation issues for each discovered file. Both commands are read-only; use `--json` on `scan` and `--format json` on `inspect` for machine-readable output.
+
 ## Features
 
 MP3, FLAC, M4A, AAC, OGG, Opus, WAV, and WMA are recognized by default. Mutagen reads title, artist, album, album artist, track/disc number, year, genre, and common raw tags. Missing, placeholder, malformed, and parser-error conditions are reported without modifying files.
