@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from luna.duplicates import find_duplicates, hash_file
 from luna.scanner import Track
@@ -32,6 +33,34 @@ class DuplicateDetectionTests(unittest.TestCase):
 
             tracks = [Track(first, None, None, None), Track(second, None, None, None)]
             self.assertEqual(find_duplicates(tracks), [])
+
+    def test_unique_sizes_are_not_hashed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.mp3"
+            second = root / "second.mp3"
+            first.write_bytes(b"one")
+            second.write_bytes(b"two-two")
+            tracks = [Track(first, None, None, None), Track(second, None, None, None)]
+
+            with patch("luna.duplicates.hash_file") as mocked_hash:
+                self.assertEqual(find_duplicates(tracks), [])
+                mocked_hash.assert_not_called()
+
+    def test_same_size_candidates_are_hashed_and_checked(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            first = root / "first.mp3"
+            second = root / "second.mp3"
+            first.write_bytes(b"same")
+            second.write_bytes(b"same")
+            tracks = [Track(first, None, None, None), Track(second, None, None, None)]
+
+            with patch("luna.duplicates.hash_file", wraps=hash_file) as mocked_hash:
+                groups = find_duplicates(tracks)
+
+            self.assertEqual(len(groups), 1)
+            self.assertEqual(mocked_hash.call_count, 2)
 
     def test_duplicate_detection_is_read_only(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
