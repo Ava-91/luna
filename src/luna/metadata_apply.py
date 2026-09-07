@@ -3,6 +3,7 @@ from pathlib import Path
 from mutagen import File
 from .backup import OperationLog
 from .normalize import normalize_track
+from .paths import resolve_mutation_path
 
 
 @dataclass(frozen=True)
@@ -22,14 +23,18 @@ def build_metadata_plan(tracks):
     ]
 
 
-def apply_metadata_plan(plan, confirm=False, log_path=None):
+def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = None):
     if not confirm:
         raise PermissionError("Applying metadata changes requires explicit confirmation (confirm=True).")
+    if root is None:
+        raise ValueError("Applying metadata changes requires the selected library root.")
 
-    log = OperationLog(log_path) if log_path else None
+    root = root.expanduser().resolve()
+    log = OperationLog(log_path, root) if log_path else None
     results = []
     for item in plan:
         try:
+            resolve_mutation_path(root, item.path)
             # Keep writes on Mutagen's easy interface, matching scanner.py's
             # read path and preserving logical field names across formats.
             audio = File(item.path, easy=True)
