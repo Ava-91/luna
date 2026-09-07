@@ -96,6 +96,7 @@ class FilesystemIntegrationTests(unittest.TestCase):
             payloads = [b"A" * 64, b"B" * 64, b"C" * 64]
             for path, payload in zip(paths, payloads):
                 self._wav(path, payload)
+            original = [path.read_bytes() for path in paths]
             plan = [
                 RenamePlanItem(paths[0], paths[1], "change", "cycle"),
                 RenamePlanItem(paths[1], paths[2], "change", "cycle"),
@@ -105,8 +106,9 @@ class FilesystemIntegrationTests(unittest.TestCase):
             results = apply_rename_plan(plan, True)
 
             self.assertTrue(all(result.success for result in results))
-            self.assertEqual(paths[0].read_bytes(), payloads[2] + b"\x00" * (len(paths[0].read_bytes()) - len(payloads[2])))
-            self.assertTrue(all(path.exists() for path in paths))
+            self.assertEqual(paths[0].read_bytes(), original[2])
+            self.assertEqual(paths[1].read_bytes(), original[0])
+            self.assertEqual(paths[2].read_bytes(), original[1])
             self.assertFalse(any(root.glob("*.luna-tmp-*")))
 
     def test_rename_failure_rolls_back_completed_moves(self):
