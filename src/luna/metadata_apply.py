@@ -11,7 +11,7 @@ class MetadataChange:
     path: Path
     field: str
     old: str | None
-    new: str
+    new: str | None
 
 
 def build_metadata_plan(tracks):
@@ -19,7 +19,7 @@ def build_metadata_plan(tracks):
         MetadataChange(track.path, item.field, item.original, item.normalized)
         for track in tracks
         for item in normalize_track(track)
-        if item.changed and item.normalized is not None
+        if item.changed
     ]
 
 
@@ -53,7 +53,10 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
                 raise OSError("Audio file could not be parsed.")
             if audio.tags is None:
                 audio.add_tags()
-            audio.tags[item.field] = [item.new]
+            if item.new is None:
+                audio.tags.pop(item.field, None)
+            else:
+                audio.tags[item.field] = [item.new]
             audio.save()
             if log:
                 log.mark_completed(log_indices[item])
