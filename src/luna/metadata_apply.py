@@ -34,10 +34,8 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
     results = []
     for item in plan:
         try:
-            resolve_mutation_path(root, item.path)
-            # Keep writes on Mutagen's easy interface, matching scanner.py's
-            # read path and preserving logical field names across formats.
-            audio = File(item.path, easy=True)
+            target = resolve_mutation_path(root, item.path)
+            audio = File(target, easy=True)
             if audio is None:
                 raise OSError("Audio file could not be parsed.")
             if audio.tags is None:
@@ -45,7 +43,7 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
             audio.tags[item.field] = [item.new]
             audio.save()
             if log:
-                log.record_metadata(item.path, item.field, item.old, item.new)
+                log.record_metadata(target, item.field, item.old, item.new)
             results.append((item, True, None))
         except Exception as exc:
             results.append((item, False, str(exc)))
