@@ -97,7 +97,7 @@ def _load_log(log_path: Path):
             raise ValueError(f"Invalid paths in operation log entry at index {index}.")
         if op["action"] == "metadata" and not isinstance(op.get("field"), str):
             raise ValueError(f"Metadata operation at index {index} is missing a field.")
-        if op["action"] == "artwork" and op.get("backup_path") is not None and not isinstance(op["backup_path"], str):
+        if op["action"] == "artwork" and op.get("backup_path") is not None and not isinstance(op.get("backup_path"), str):
             raise ValueError(f"Artwork operation at index {index} has an invalid backup path.")
         if op.get("status", "pending") not in {"pending", "completed"}:
             raise ValueError(f"Invalid operation status at index {index}.")
@@ -183,10 +183,21 @@ def _rollback_rename_group(operations, root):
         return [(False, str(op["destination"]), f"Rename rollback failed{detail}") for op in operations]
 
 
-def _persist_state(log_path, log, state):
-    payload = dict(log)
-    payload["state"] = state
-    _atomic_write_json(log_path, payload)
+def _rollback_metadata(op, root):
+    from mutagen import File
+    path = Path(op["source"])
+    target = resolve_mutation_path(root, path)
+    audio = File(target, easy=True)
+    if audio is None:
+        raise OSError("Audio file could not be parsed.")
+    if audio.tags is None:
+        audio.add_tags()
+    if op["old_value"] is None:
+        audio.tags.pop(op["field"], None)
+    else:
+        audio.tags[op["field"]] = [op["old_value"]]
+    audio.save()
+    return (True, str(path), op["field"])
 
 
 def rollback(log_path: Path, confirm=False, root: Path | None = None):
@@ -212,25 +223,9 @@ def rollback(log_path: Path, confirm=False, root: Path | None = None):
             except (OSError, ValueError) as exc:
                 results.extend((False, str(item["destination"]), str(exc)) for item in group)
             continue
-        if op.get("status", "completed") != "completed":
-            index -= 1
-            continue
         if op["action"] == "metadata":
             try:
-                from mutagen import File
-                path = Path(op["source"])
-                target = resolve_mutation_path(root, path)
-                audio = File(target, easy=True)
-                if audio is None:
-                    raise OSError("Audio file could not be parsed.")
-                if audio.tags is None:
-                    audio.add_tags()
-                if op["old_value"] is None:
-                    audio.tags.pop(op["field"], None)
-                else:
-                    audio.tags[op["field"]] = [op["old_value"]]
-                audio.save()
-                results.append((True, str(path), op["field"]))
+                results.append(_rollback_metadata(op, root))
             except Exception as exc:
                 results.append((False, str(op["source"]), str(exc)))
             index -= 1
