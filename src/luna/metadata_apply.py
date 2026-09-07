@@ -32,16 +32,22 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
     root = root.expanduser().resolve()
     log = OperationLog(log_path, root) if log_path and plan else None
     log_indices = {}
-    if log:
-        for item in plan:
-            target = resolve_mutation_path(root, item.path)
-            log_indices[item] = log.record_metadata(target, item.field, item.old, item.new)
-        log.save()
-
+    valid_items = []
     results = []
     for item in plan:
         try:
             target = resolve_mutation_path(root, item.path)
+            valid_items.append((item, target))
+            if log:
+                log_indices[item] = log.record_metadata(target, item.field, item.old, item.new)
+        except ValueError as exc:
+            results.append((item, False, str(exc)))
+
+    if log and valid_items:
+        log.save()
+
+    for item, target in valid_items:
+        try:
             audio = File(target, easy=True)
             if audio is None:
                 raise OSError("Audio file could not be parsed.")
@@ -55,6 +61,6 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
         except Exception as exc:
             results.append((item, False, str(exc)))
 
-    if log and all(ok for _, ok, _ in results):
+    if log and valid_items and all(ok for _, ok, _ in results if _ in [item for item, _ in valid_items]):
         log.finalize()
     return results
