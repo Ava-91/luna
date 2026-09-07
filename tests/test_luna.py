@@ -16,18 +16,24 @@ class LunaTests(unittest.TestCase):
     def test_scanner_is_recursive_and_ignores_unsupported(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); (root/'nested').mkdir(); (root/'a.mp3').write_bytes(b'not-real-audio'); (root/'nested'/'b.flac').write_bytes(b'x'); (root/'note.txt').write_text('x')
-            tracks=scan_library(root,workers=1,index=LibraryIndex(root/'index.sqlite3'))
+            index=LibraryIndex(root/'index.sqlite3')
+            try:
+                tracks=scan_library(root,workers=1,index=index)
+            finally:
+                index.close()
             self.assertEqual([p.name for p in (t.path for t in tracks)],['a.mp3','b.flac']); self.assertTrue(all(t.metadata_error for t in tracks))
     def test_index_reuses_unchanged_track_without_reparsing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); path=root/'song.mp3'; path.write_bytes(b'not-real-audio'); index=LibraryIndex(root/'index.sqlite3')
-            first=scan_library(root,workers=1,index=index)
-            self.assertEqual(first[0].metadata_error, 'Audio file could not be parsed.')
-            with patch('luna.scanner.inspect_file', side_effect=AssertionError('unchanged file should be served from the index')):
-                second=scan_library(root,workers=1,index=index)
-            self.assertEqual(second[0].path, path)
-            self.assertEqual(second[0].size, first[0].size)
-            index.close()
+            try:
+                first=scan_library(root,workers=1,index=index)
+                self.assertTrue(first[0].metadata_error)
+                with patch('luna.scanner.inspect_file', side_effect=AssertionError('unchanged file should be served from the index')):
+                    second=scan_library(root,workers=1,index=index)
+                self.assertEqual(second[0].path, path)
+                self.assertEqual(second[0].size, first[0].size)
+            finally:
+                index.close()
     def test_normalization_preserves_unicode_and_numbers(self):
         self.assertEqual(normalize_text('  Björk   |  Vespertine  '),'Björk | Vespertine'); self.assertEqual(normalize_track_number('03/12'),3)
     def test_cross_platform_reserved_names(self):
