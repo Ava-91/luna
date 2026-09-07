@@ -16,6 +16,7 @@ from .export import export_json, export_text, export_markdown
 from .apply import apply_rename_plan
 from .metadata_apply import build_metadata_plan, apply_metadata_plan
 from .backup import OperationLog, rollback
+from .paths import resolve_mutation_path
 
 
 def load_tracks(path):
@@ -41,14 +42,6 @@ def _benchmark(path):
         timings[name] = time.perf_counter() - start
     timings["total"] = sum(timings.values())
     return {"tracks": len(tracks), "seconds": timings}
-
-
-def _inside(root: Path, path: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except ValueError:
-        return False
 
 
 def _embed_artwork(path: Path, image_path: Path) -> None:
@@ -102,15 +95,19 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
     if not confirm:
         raise PermissionError("Applying artwork changes requires explicit confirmation (confirm=True).")
 
+    root = root.expanduser().resolve()
     candidates = []
     for track in tracks:
-        if _inside(root, track.path.parent):
-            album = track.album or "<missing album>"
-            artist = getattr(track, "album_artist", None) or track.artist or "<missing artist>"
-            candidates.extend(local_candidates(track.path.parent, album, artist))
+        try:
+            resolve_mutation_path(root, track.path)
+        except ValueError:
+            continue
+        album = track.album or "<missing album>"
+        artist = getattr(track, "album_artist", None) or track.artist or "<missing artist>"
+        candidates.extend(local_candidates(track.path.parent, album, artist))
 
     plan = build_artwork_plan(tracks, candidates)
-    log = OperationLog(log_path) if log_path else None
+    log = OperationLog(log_path, root) if log_path else None
     backup_dir = None
     if log:
         backup_dir = log_path.with_name(log_path.stem + "-backups")
@@ -123,21 +120,24 @@ def apply_artwork_changes(root: Path, tracks, confirm: bool, log_path: Path | No
             for path in change.tracks:
                 results.append({"path": str(path), "success": False, "error": "No local cover candidate found."})
             continue
-        if not _inside(root, candidate.source):
+        try:
+            candidate_source = resolve_mutation_path(root, candidate.source)
+        except ValueError:
             for path in change.tracks:
                 results.append({"path": str(path), "success": False, "error": "Artwork candidate is outside the selected library."})
             continue
         for path in change.tracks:
             backup_path = None
             try:
+                target = resolve_mutation_path(root, path)
                 if log:
-                    digest = hashlib.sha256(str(path.resolve()).encode("utf-8")).hexdigest()
+                    digest = hashlib.sha256(str(target).encode("utf-8")).hexdigest()
                     backup_path = backup_dir / f"{digest}.bak"
-                    shutil.copy2(path, backup_path)
-                _embed_artwork(path, candidate.source)
+                    shutil.copy2(target, backup_path)
+                _embed_artwork(target, candidate_source)
                 if log:
-                    log.record_artwork(path, candidate.source, backup_path)
-                results.append({"path": str(path), "source": str(candidate.source), "success": True, "error": None, "backup": str(backup_path) if backup_path else None})
+                    log.record_artwork(target, candidate_source, backup_path)
+                results.append({"path": str(path), "source": str(candidate_source), "success": True, "error": None, "backup": str(backup_path) if backup_path else None})
             except Exception as exc:
                 if backup_path and backup_path.exists():
                     backup_path.unlink()
@@ -196,6 +196,7 @@ def main(argv=None):
 
     q = sub.add_parser("rollback", help="Rollback an operation log")
     q.add_argument("log", type=Path)
+    q.add_argument("--root", type=Path, help="Selected library root for legacy logs without a recorded root")
     q.add_argument("--confirm", action="store_true")
     q = sub.add_parser("config", help="Manage library profile")
     q.add_argument("action", choices=("show", "set", "reset"))
@@ -221,7 +222,7 @@ def main(argv=None):
     if args.command == "rollback":
         if not args.confirm:
             parser.error("rollback requires --confirm")
-        print(json.dumps(rollback(args.log, True), indent=2))
+        print(json.dumps(rollback(args.log, True, args.root), indent=2))
         return
     if args.command == "gui":
         from .gui import launch
@@ -303,11 +304,11 @@ def main(argv=None):
             print(json.dumps(apply_artwork_changes(root, tracks, True, args.log), ensure_ascii=False, indent=2))
             return
         if args.metadata:
-            results = apply_metadata_plan(build_metadata_plan(tracks), True, args.log)
+            results = apply_metadata_plan(build_metadata_plan(tracks), True, args.log, root)
             print(json.dumps([{"path": str(item.path), "field": item.field, "success": ok, "error": error} for item, ok, error in results], indent=2))
             return
         renames = build_rename_plan(tracks)
-        results = apply_rename_plan(renames, True, args.log)
+        results = apply_rename_plan(renames, True, args.log, root)
         print(json.dumps([{"source": str(r.source), "destination": str(r.destination), "success": r.success, "error": r.error} for r in results], indent=2))
         return
     else:
