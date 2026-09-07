@@ -39,16 +39,19 @@ class TransactionRecoveryTests(unittest.TestCase):
             track.write_bytes(b"original")
 
             class Candidate:
-                source = source
+                def __init__(self, path):
+                    self.source = path
 
             class Change:
-                tracks = [track]
-                candidate = Candidate()
+                def __init__(self, path, candidate):
+                    self.tracks = [path]
+                    self.candidate = candidate
 
-            with patch("luna.cli.build_artwork_plan", return_value=[Change()]), patch("luna.cli._embed_artwork"), patch("luna.backup.OperationLog.mark_completed", side_effect=OSError("interrupted")):
+            change = Change(track, Candidate(source))
+            with patch("luna.cli.build_artwork_plan", return_value=[change]), patch("luna.cli._embed_artwork"), patch("luna.backup.OperationLog.mark_completed", side_effect=OSError("interrupted")):
                 result = apply_artwork_changes(root, [], True, root / "operations.json")
             self.assertFalse(result[0]["success"])
-            backup = next((root / "operations.json-backups").glob("*.bak"))
+            backup = next((root / "operations-backups").glob("*.bak"))
             self.assertTrue(backup.exists())
             recovered = rollback(root / "operations.json", True)
             self.assertTrue(recovered[0][0])
