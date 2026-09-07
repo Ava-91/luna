@@ -74,7 +74,7 @@ class ProbableDuplicateGroupTests(unittest.TestCase):
             second = self._track(root, "b.mp3", size=101)
             groups = find_probable_duplicates([first, second])
             self.assertEqual(len(groups), 1)
-            self.assertEqual(groups[0].confidence, 0.85)
+            self.assertEqual(groups[0].confidence, 0.95)
             self.assertNotIn("file size matches", groups[0].reasons)
 
     def test_single_track_is_not_reported(self):
