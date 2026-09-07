@@ -12,6 +12,18 @@ from luna.normalize import normalize_track
 from luna.scanner import Track
 
 
+class _EasyAudio:
+    def __init__(self, path: Path):
+        self.path = path
+        self.tags = EasyID3(path)
+
+    def add_tags(self):
+        return None
+
+    def save(self):
+        self.tags.save(self.path)
+
+
 class MetadataNoneApplicationTests(unittest.TestCase):
     def _tagged_file(self, path: Path):
         tags = EasyID3()
@@ -43,7 +55,7 @@ class MetadataNoneApplicationTests(unittest.TestCase):
             self._tagged_file(path)
             plan = build_metadata_plan([self._track(path)])
 
-            with patch("luna.metadata_apply.File", side_effect=lambda target, easy=True: EasyID3(target)):
+            with patch("luna.metadata_apply.File", side_effect=lambda target, easy=True: _EasyAudio(target)):
                 results = apply_metadata_plan(plan, confirm=True, log_path=log_path, root=root)
             self.assertTrue(all(ok for _, ok, _ in results))
 
@@ -56,7 +68,7 @@ class MetadataNoneApplicationTests(unittest.TestCase):
             self.assertEqual(album_operation["old_value"], " ")
             self.assertIsNone(album_operation["new_value"])
 
-            with patch("mutagen.File", side_effect=lambda target, easy=True: EasyID3(target)):
+            with patch("mutagen.File", side_effect=lambda target, easy=True: _EasyAudio(target)):
                 rollback_results = rollback(log_path, confirm=True)
             self.assertTrue(all(ok for ok, *_ in rollback_results))
 
