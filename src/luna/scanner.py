@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from mutagen import File
 
 AUDIO_EXTENSIONS={".mp3",".flac",".m4a",".aac",".ogg",".opus",".wav",".wma"}
@@ -34,8 +35,12 @@ def inspect_file(path:Path)->Track:
         return Track(path,_first(tags,"title"),_first(tags,"artist"),_first(tags,"album"),_number(_first(tags,"tracknumber")),_first(tags,"albumartist"),_number(_first(tags,"discnumber")),_year(_first(tags,"date") or _first(tags,"year")),_first(tags,"genre"),path.suffix.lower().lstrip("."),stat.st_size,stat.st_mtime,raw)
     except Exception as exc:return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error=str(exc))
 
+def _default_index_path(root: Path) -> Path:
+    key = sha256(str(root.resolve()).encode("utf-8")).hexdigest()
+    return Path.home()/".cache"/"luna"/"indexes"/f"{key}.sqlite3"
+
 def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error=None,on_progress=None,index=None)->list[Track]:
-    """Recursively scan supported audio files, optionally reusing a LibraryIndex cache."""
+    """Recursively scan supported audio files, reusing cached metadata for unchanged files."""
     extensions={x.lower() if x.startswith(".") else "."+x.lower() for x in (extensions or AUDIO_EXTENSIONS)}; ignored={Path(x).resolve() for x in (ignored_paths or [])}; paths=[]
     for path in sorted(root.rglob("*")):
         try:
@@ -44,13 +49,10 @@ def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error
         except OSError as exc:
             if on_error:on_error(path,exc)
 
+    owned_index = index is None
     if index is None:
-        tracks=[]
-        with ThreadPoolExecutor(max_workers=max(1,workers)) as pool:
-            for index_number,track in enumerate(pool.map(inspect_file,paths),1):
-                tracks.append(track)
-                if on_progress:on_progress(index_number,len(paths),track)
-        return sorted(tracks,key=lambda x:str(x.path))
+        from .index import LibraryIndex
+        index = LibraryIndex(_default_index_path(root))
 
     cached={}; pending=[]
     for path in paths:
@@ -61,16 +63,12 @@ def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error
                 continue
         pending.append(path)
 
-    tracks=[]
-    total=len(paths)
-    completed=0
+    tracks=[]; total=len(paths); completed=0
     for path in paths:
-        if path not in cached:
-            continue
-        track=cached[path]
-        tracks.append(track)
-        completed+=1
-        if on_progress:on_progress(completed,total,track)
+        if path in cached:
+            track=cached[path]
+            tracks.append(track); completed+=1
+            if on_progress:on_progress(completed,total,track)
 
     if pending:
         with ThreadPoolExecutor(max_workers=max(1,workers)) as pool:
@@ -79,4 +77,6 @@ def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error
                 index.upsert(track)
                 completed+=1
                 if on_progress:on_progress(completed,total,track)
+
+    if owned_index:index.close()
     return sorted(tracks,key=lambda x:str(x.path))
