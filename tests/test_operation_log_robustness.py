@@ -16,7 +16,7 @@ class OperationLogRobustnessTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             self.assertEqual(rollback(self._write(Path(tmp), []), True), [])
 
-    def test_non_array_log_is_rejected(self):
+    def test_malformed_transaction_object_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             with self.assertRaises(ValueError):
                 rollback(self._write(Path(tmp), {"action": "rename"}), True)
