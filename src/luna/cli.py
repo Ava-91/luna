@@ -156,10 +156,25 @@ def _build_report_payload(tracks):
     return build_report(tracks, validations, duplicates, art, renames)
 
 
+def _scan_payload(tracks):
+    return [
+        {"path": str(t.path), "title": t.title, "artist": t.artist, "album": t.album, "format": t.format, "metadata_error": t.metadata_error}
+        for t in tracks
+    ]
+
+
+def _inspect_payload(tracks):
+    validations = validate_library(tracks)
+    return [
+        {"path": str(t.path), "title": t.title, "artist": t.artist, "album": t.album, "format": t.format, "metadata_error": t.metadata_error, "issues": [i.message for i in v.issues]}
+        for t, v in zip(tracks, validations)
+    ], validations
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Luna — local-first music library cleaner")
     sub = parser.add_subparsers(dest="command", required=True)
-    p = sub.add_parser("scan", help="Read-only scan")
+    p = sub.add_parser("scan", help="Discover supported audio files")
     p.add_argument("path", type=Path)
     p.add_argument("--json", action="store_true")
     for name, help_text in (("inspect", "Validate metadata"), ("duplicates", "Find exact and probable duplicates"), ("artwork", "Audit embedded artwork"), ("artwork-plan", "Preview artwork replacement candidates"), ("normalize-plan", "Preview metadata normalization"), ("rename-plan", "Preview safe filename changes"), ("report", "Build library health report")):
@@ -228,17 +243,31 @@ def main(argv=None):
 
     tracks = load_tracks(root)
 
-    if args.command in {"scan", "inspect"}:
-        validations = validate_library(tracks)
-        payload = [{"path": str(t.path), "title": t.title, "artist": t.artist, "album": t.album, "format": t.format, "metadata_error": t.metadata_error, "issues": [i.message for i in v.issues]} for t, v in zip(tracks, validations)]
-        if getattr(args, "json", False):
+    if args.command == "scan":
+        payload = _scan_payload(tracks)
+        if args.json:
             print(json.dumps(payload, ensure_ascii=False, indent=2))
             return
         for row in payload:
             print(f"{row['artist'] or '<missing artist>'} — {row['title'] or '<missing title>'} [{row['album'] or '<missing album>'}] :: {row['path']}")
-            for issue in row["issues"]:
-                print(f"  ! {issue}")
-        print(f"Found {len(tracks)} audio file(s). Metadata issues: {sum(not v.valid for v in validations)}.")
+        print(f"Found {len(tracks)} audio file(s).")
+        return
+
+    if args.command == "inspect":
+        payload, validations = _inspect_payload(tracks)
+        if args.format == "json":
+            text = json.dumps(payload, ensure_ascii=False, indent=2)
+        else:
+            text = "\n".join(
+                [
+                    *[f"{row['artist'] or '<missing artist>'} — {row['title'] or '<missing title>'} [{row['album'] or '<missing album>'}] :: {row['path']}" + ("\n" + "\n".join(f"  ! {issue}" for issue in row["issues"]) if row["issues"] else "") for row in payload],
+                    f"Found {len(tracks)} audio file(s). Metadata issues: {sum(not v.valid for v in validations)}.",
+                ]
+            )
+        if args.output:
+            export_text(text, args.output)
+        else:
+            print(text)
         return
 
     if args.command == "duplicates":
