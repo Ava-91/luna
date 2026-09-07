@@ -93,22 +93,43 @@ def probable_duplicate_score(first: Track, second: Track) -> tuple[float, tuple[
     return round(min(score, 0.99), 2), tuple(reasons)
 
 
+def _group_reasons(reason_sets):
+    common = set(reason_sets[0])
+    for reasons in reason_sets[1:]:
+        common.intersection_update(reasons)
+    return tuple(reason for reason in reason_sets[0] if reason in common)
+
+
 def find_probable_duplicates(tracks):
-    groups = defaultdict(list)
+    buckets = defaultdict(list)
     for track in tracks:
         artist = _normalized(track.artist)
         title = _normalized(track.title)
         if artist and title:
-            groups[(artist, title)].append(track)
+            buckets[(artist, title)].append(track)
 
     results = []
-    for items in groups.values():
-        if len(items) < 2:
-            continue
-        ordered = tuple(sorted(items, key=lambda x: str(x.path)))
-        confidence, reasons = probable_duplicate_score(ordered[0], ordered[1])
-        if confidence >= 0.60:
-            if len({track.path.suffix.lower() for track in ordered}) > 1:
+    for items in buckets.values():
+        remaining = list(sorted(items, key=lambda x: str(x.path)))
+        while len(remaining) >= 2:
+            representative = remaining.pop(0)
+            scored = [
+                (candidate, *probable_duplicate_score(representative, candidate))
+                for candidate in remaining
+            ]
+            qualifying = [(candidate, score, reasons) for candidate, score, reasons in scored if score >= 0.60]
+            if not qualifying:
+                continue
+
+            group_threshold = max(score for _, score, _ in qualifying)
+            matches = [(candidate, score, reasons) for candidate, score, reasons in qualifying if score >= group_threshold]
+            group = (representative, *(candidate for candidate, _, _ in matches))
+            confidence = group_threshold
+            reasons = _group_reasons([reasons for _, _, reasons in matches])
+            if len({track.path.suffix.lower() for track in group}) > 1:
                 reasons = reasons + ("different file formats",)
-            results.append(ProbableDuplicate(ordered, confidence, reasons))
+            results.append(ProbableDuplicate(tuple(group), confidence, reasons))
+            matched = {candidate for candidate, _, _ in matches}
+            remaining = [track for track in remaining if track not in matched]
+
     return sorted(results, key=lambda x: tuple(str(t.path) for t in x.tracks))
