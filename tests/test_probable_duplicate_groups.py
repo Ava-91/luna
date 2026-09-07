@@ -35,7 +35,6 @@ class ProbableDuplicateGroupTests(unittest.TestCase):
             self.assertEqual(len(groups), 1)
             self.assertEqual({track.path.name for track in groups[0].tracks}, {"a.mp3", "b.mp3"})
             self.assertEqual(groups[0].confidence, 0.95)
-            self.assertNotIn("c.mp3", {track.path.name for track in groups[0].tracks})
 
     def test_two_separate_duplicate_clusters_in_one_bucket(self):
         with tempfile.TemporaryDirectory() as tmp:
