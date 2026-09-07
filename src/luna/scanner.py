@@ -1,8 +1,9 @@
-from dataclasses import dataclass
-from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from hashlib import sha256
-from mutagen import File
+from pathlib import Path
+
+from mutagen import File, MutagenError
 
 AUDIO_EXTENSIONS={".mp3",".flac",".m4a",".aac",".ogg",".opus",".wav",".wma"}
 
@@ -33,7 +34,8 @@ def inspect_file(path:Path)->Track:
         if audio is None:return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error="Audio file could not be parsed.")
         tags=audio.tags; raw={str(k):v for k,v in (tags.items() if hasattr(tags,"items") else [])}
         return Track(path,_first(tags,"title"),_first(tags,"artist"),_first(tags,"album"),_number(_first(tags,"tracknumber")),_first(tags,"albumartist"),_number(_first(tags,"discnumber")),_year(_first(tags,"date") or _first(tags,"year")),_first(tags,"genre"),path.suffix.lower().lstrip("."),stat.st_size,stat.st_mtime,raw)
-    except Exception as exc:return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error=str(exc))
+    except (OSError, MutagenError) as exc:
+        return Track(path,None,None,None,format=path.suffix.lower().lstrip("."),size=stat.st_size,modified=stat.st_mtime,raw_metadata={},metadata_error=str(exc))
 
 def _default_index_path(root: Path) -> Path:
     key = sha256(str(root.resolve()).encode("utf-8")).hexdigest()
