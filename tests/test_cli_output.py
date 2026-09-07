@@ -25,6 +25,50 @@ class CLIOutputContractTests(unittest.TestCase):
                 cli.main(["report", tmp, "--format", "json"])
         self.assertEqual(json.loads(output.getvalue()), payload)
 
+    def test_report_markdown_is_real_markdown(self):
+        payload = {
+            "tracks": 2,
+            "formats": [".flac", ".mp3"],
+            "metadata_issues": 1,
+            "missing_core_metadata": 1,
+            "duplicate_groups": 0,
+            "duplicate_wasted_bytes": 0,
+            "missing_artwork": 1,
+            "suspicious_filenames": 1,
+            "proposed_renames": 1,
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "load_tracks", return_value=[]), patch.object(cli, "_build_report_payload", return_value=payload):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                cli.main(["report", tmp, "--format", "markdown"])
+
+        markdown = output.getvalue()
+        self.assertIn("# Luna library health", markdown)
+        self.assertIn("| Metric | Value |", markdown)
+        self.assertIn("| Tracks | 2 |", markdown)
+        self.assertNotIn('"tracks": 2', markdown)
+
+    def test_report_markdown_empty_report_is_valid(self):
+        payload = {
+            "tracks": 0,
+            "formats": [],
+            "metadata_issues": 0,
+            "missing_core_metadata": 0,
+            "duplicate_groups": 0,
+            "duplicate_wasted_bytes": 0,
+            "missing_artwork": 0,
+            "suspicious_filenames": 0,
+            "proposed_renames": 0,
+        }
+        with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "load_tracks", return_value=[]), patch.object(cli, "_build_report_payload", return_value=payload):
+            output = io.StringIO()
+            with redirect_stdout(output):
+                cli.main(["report", tmp, "--format", "markdown"])
+
+        markdown = output.getvalue()
+        self.assertIn("| Formats | none |", markdown)
+        self.assertIn("| Tracks | 0 |", markdown)
+
     def test_export_writes_json_without_human_report_payload(self):
         payload = {"tracks": 0}
         with tempfile.TemporaryDirectory() as tmp, patch.object(cli, "load_tracks", return_value=[]), patch.object(cli, "_build_report_payload", return_value=payload):

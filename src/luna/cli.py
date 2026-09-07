@@ -10,7 +10,7 @@ from .planner import build_rename_plan
 from .artwork import audit_artwork
 from .artwork_plan import build_artwork_plan, local_candidates
 from .normalize import normalization_plan
-from .report import build_report, render_report
+from .report import build_report, render_report, render_markdown_report
 from .config import load_config, save_config, reset_config
 from .export import export_json, export_text, export_markdown
 from .apply import apply_rename_plan
@@ -258,7 +258,7 @@ def main(argv=None):
         text = json.dumps([{"source": str(x.source), "destination": str(x.destination) if x.destination else None, "status": x.status, "reason": x.reason} for x in renames], ensure_ascii=False, indent=2)
     elif args.command == "report":
         payload = _build_report_payload(tracks)
-        text = render_report(payload) if args.format == "text" else json.dumps(payload, ensure_ascii=False, indent=2)
+        text = render_report(payload) if args.format == "text" else render_markdown_report(payload) if args.format == "markdown" else json.dumps(payload, ensure_ascii=False, indent=2)
     elif args.command == "export":
         payload = _build_report_payload(tracks)
         export_json(payload, args.output)
