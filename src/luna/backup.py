@@ -4,6 +4,8 @@ import json
 from datetime import datetime, timezone
 import shutil
 
+from .paths import resolve_mutation_path
+
 
 @dataclass(frozen=True)
 class Operation:
@@ -15,11 +17,13 @@ class Operation:
     old_value: str | None = None
     new_value: str | None = None
     backup_path: str | None = None
+    library_root: str | None = None
 
 
 class OperationLog:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, library_root: Path | None = None):
         self.path = path
+        self.library_root = library_root.expanduser().resolve() if library_root else None
         self.operations = []
 
     def record(self, action, source, destination, field=None, old_value=None, new_value=None, backup_path=None):
@@ -33,6 +37,7 @@ class OperationLog:
                 old_value,
                 new_value,
                 str(backup_path) if backup_path else None,
+                str(self.library_root) if self.library_root else None,
             )
         )
 
@@ -67,15 +72,27 @@ def _load_operations(log_path: Path):
             raise ValueError(f"Metadata operation at index {index} is missing a field.")
         if op["action"] == "artwork" and op.get("backup_path") is not None and not isinstance(op["backup_path"], str):
             raise ValueError(f"Artwork operation at index {index} has an invalid backup path.")
+        if op.get("library_root") is not None and not isinstance(op["library_root"], str):
+            raise ValueError(f"Invalid library root in operation log entry at index {index}.")
         operations.append(op)
     return operations
 
 
-def rollback(log_path: Path, confirm=False):
+def _rollback_root(operations, root):
+    if root is not None:
+        return Path(root).expanduser().resolve()
+    roots = {op.get("library_root") for op in operations}
+    if len(roots) != 1 or None in roots:
+        raise ValueError("Rollback requires a selected library root or a log created with one.")
+    return Path(next(iter(roots))).resolve()
+
+
+def rollback(log_path: Path, confirm=False, root: Path | None = None):
     if not confirm:
         raise PermissionError("Rollback requires explicit confirmation (confirm=True).")
 
     operations = _load_operations(log_path)
+    root = _rollback_root(operations, root)
     results = []
     for op in reversed(operations):
         if op["action"] == "metadata":
@@ -83,6 +100,7 @@ def rollback(log_path: Path, confirm=False):
                 from mutagen import File
 
                 path = Path(op["source"])
+                resolve_mutation_path(root, path)
                 audio = File(path, easy=True)
                 if audio is None:
                     raise OSError("Audio file could not be parsed.")
@@ -109,15 +127,22 @@ def rollback(log_path: Path, confirm=False):
                 results.append((False, str(source), "Artwork backup is missing."))
                 continue
             try:
+                resolve_mutation_path(root, source)
                 source.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(backup, source)
                 results.append((True, str(source), str(backup)))
-            except OSError as exc:
+            except (OSError, ValueError) as exc:
                 results.append((False, str(source), str(exc)))
             continue
 
-        src = Path(op["destination"])
-        dst = Path(op["source"])
+        try:
+            src = Path(op["destination"])
+            dst = Path(op["source"])
+            resolve_mutation_path(root, src)
+            resolve_mutation_path(root, dst)
+        except ValueError as exc:
+            results.append((False, str(op["destination"]), str(exc)))
+            continue
         if not src.exists():
             results.append((False, str(src), "Changed file is missing."))
             continue
