@@ -38,6 +38,7 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
         return []
 
     source_paths = set()
+    resolved_items = {}
     seen_sources = set()
     for item in changes:
         try:
@@ -49,67 +50,59 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
             raise ValueError(f"Invalid rename plan: duplicate source: {item.source}")
         seen_sources.add(source)
         source_paths.add(source)
-        if not item.source.exists():
-            return [
-                AppliedChange(change.source, change.destination, False, "Rename plan is stale: source no longer exists.")
-                for change in changes
-            ]
+        resolved_items[item] = (source, destination)
+        if not source.exists():
+            return [AppliedChange(change.source, change.destination, False, "Rename plan is stale: source no longer exists.") for change in changes]
 
     for item in changes:
-        destination = resolve_mutation_path(root, item.destination)
+        _, destination = resolved_items[item]
         if destination.exists() and destination not in source_paths:
-            return [
-                AppliedChange(change.source, change.destination, False, f"Destination already exists: {change.destination}")
-                for change in changes
-            ]
+            return [AppliedChange(change.source, change.destination, False, f"Destination already exists: {change.destination}") for change in changes]
 
     log = OperationLog(log_path, root) if log_path else None
-    reserved = source_paths | {resolve_mutation_path(root, item.destination) for item in changes}
+    reserved = source_paths | {destination for _, destination in resolved_items.values()}
     temporary = {}
     completed = []
 
     try:
         for item in changes:
-            temp = _temporary_path(item.source, reserved)
-            item.source.rename(temp)
-            temporary[item.source] = temp
+            source, _ = resolved_items[item]
+            temp = _temporary_path(source, reserved)
+            source.rename(temp)
+            temporary[item] = temp
 
         for item in changes:
-            temp = temporary[item.source]
-            temp.rename(item.destination)
+            _, destination = resolved_items[item]
+            temp = temporary[item]
+            temp.rename(destination)
             completed.append(item)
     except OSError as exc:
         recovery_errors = []
         for item in reversed(completed):
+            source, destination = resolved_items[item]
             try:
-                item.destination.rename(item.source)
+                destination.rename(source)
             except OSError as recovery_exc:
-                recovery_errors.append(f"{item.destination} -> {item.source}: {recovery_exc}")
+                recovery_errors.append(f"{destination} -> {source}: {recovery_exc}")
         for item in changes:
-            temp = temporary.get(item.source)
+            source, _ = resolved_items[item]
+            temp = temporary.get(item)
             if temp is not None and temp.exists():
                 try:
-                    temp.rename(item.source)
+                    temp.rename(source)
                 except OSError as recovery_exc:
-                    recovery_errors.append(f"{temp} -> {item.source}: {recovery_exc}")
+                    recovery_errors.append(f"{temp} -> {source}: {recovery_exc}")
 
         if recovery_errors:
             detail = "; ".join(recovery_errors)
             raise RuntimeError(f"Rename failed and recovery was incomplete: {detail}") from exc
 
-        return [
-            AppliedChange(
-                item.source,
-                item.destination,
-                False,
-                f"Rename transaction rolled back after failure: {exc}" if item not in completed else "Rename transaction rolled back after failure.",
-            )
-            for item in changes
-        ]
+        return [AppliedChange(item.source, item.destination, False, f"Rename transaction rolled back after failure: {exc}" if item not in completed else "Rename transaction rolled back after failure.") for item in changes]
 
     if log:
         for item in completed:
-            log.record("rename", item.source, item.destination)
+            source, destination = resolved_items[item]
+            log.record("rename", source, destination)
         log.save()
 
     return [AppliedChange(item.source, item.destination, True) for item in completed]
