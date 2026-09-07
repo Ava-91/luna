@@ -61,6 +61,7 @@ def apply_metadata_plan(plan, confirm=False, log_path=None, root: Path | None = 
         except Exception as exc:
             results.append((item, False, str(exc)))
 
-    if log and valid_items and all(ok for _, ok, _ in results if _ in [item for item, _ in valid_items]):
+    valid_item_set = {item for item, _ in valid_items}
+    if log and valid_items and all(ok for item, ok, _ in results if item in valid_item_set):
         log.finalize()
     return results
