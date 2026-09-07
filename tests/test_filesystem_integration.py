@@ -56,7 +56,7 @@ class FilesystemIntegrationTests(unittest.TestCase):
             self._wav(source)
             plan = [RenamePlanItem(source, destination, "change", "integration test")]
 
-            results = apply_rename_plan(plan, True, root / "operations.json")
+            results = apply_rename_plan(plan, True, root / "operations.json", root)
 
             self.assertTrue(results[0].success)
             self.assertFalse(source.exists())
@@ -82,7 +82,7 @@ class FilesystemIntegrationTests(unittest.TestCase):
                 RenamePlanItem(second, first, "change", "cycle"),
             ]
 
-            results = apply_rename_plan(plan, True)
+            results = apply_rename_plan(plan, True, root=root)
 
             self.assertTrue(all(result.success for result in results))
             self.assertEqual(first.read_bytes(), original_second)
@@ -103,7 +103,7 @@ class FilesystemIntegrationTests(unittest.TestCase):
                 RenamePlanItem(paths[2], paths[0], "change", "cycle"),
             ]
 
-            results = apply_rename_plan(plan, True)
+            results = apply_rename_plan(plan, True, root=root)
 
             self.assertTrue(all(result.success for result in results))
             self.assertEqual(paths[0].read_bytes(), original[2])
@@ -136,7 +136,7 @@ class FilesystemIntegrationTests(unittest.TestCase):
 
             log_path = root / "operations.json"
             with patch.object(Path, "rename", new=rename_with_failure):
-                results = apply_rename_plan(plan, True, log_path)
+                results = apply_rename_plan(plan, True, log_path, root)
 
             self.assertTrue(all(not result.success for result in results))
             self.assertIn("rolled back", results[0].error.lower())
@@ -144,6 +144,102 @@ class FilesystemIntegrationTests(unittest.TestCase):
             self.assertEqual(second.read_bytes(), original_second)
             self.assertFalse(log_path.exists())
             self.assertFalse(any(root.glob("*.luna-tmp-*")))
+
+    def test_external_symlink_is_rejected_by_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "library"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            target = outside / "song.wav"
+            self._wav(target, b"outside" * 16)
+            link = root / "link.wav"
+            try:
+                link.symlink_to(target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            result = apply_rename_plan([RenamePlanItem(link, root / "new.wav", "change", "symlink")], True, root=root)
+
+            self.assertFalse(result[0].success)
+            self.assertIn("symlink", result[0].error.lower())
+            self.assertEqual(target.read_bytes(), target.read_bytes())
+            self.assertTrue(link.is_symlink())
+
+    def test_internal_symlink_is_rejected_by_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            target = root / "real.wav"
+            self._wav(target)
+            link = root / "link.wav"
+            try:
+                link.symlink_to(target)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            result = apply_rename_plan([RenamePlanItem(link, root / "new.wav", "change", "symlink")], True, root=root)
+
+            self.assertFalse(result[0].success)
+            self.assertIn("symlink", result[0].error.lower())
+            self.assertTrue(target.exists())
+            self.assertTrue(link.is_symlink())
+
+    def test_nested_external_symlink_is_rejected_by_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "library"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            target = outside / "song.wav"
+            self._wav(target)
+            second = root / "second.wav"
+            first = root / "first.wav"
+            try:
+                second.symlink_to(target)
+                first.symlink_to(second)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            result = apply_rename_plan([RenamePlanItem(first, root / "new.wav", "change", "symlink")], True, root=root)
+
+            self.assertFalse(result[0].success)
+            self.assertIn("symlink", result[0].error.lower())
+            self.assertTrue(target.exists())
+
+    def test_missing_symlink_target_is_rejected_by_rename(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base = Path(tmp)
+            root = base / "library"
+            outside = base / "outside"
+            root.mkdir()
+            outside.mkdir()
+            missing = outside / "missing.wav"
+            link = root / "link.wav"
+            try:
+                link.symlink_to(missing)
+            except (OSError, NotImplementedError) as exc:
+                self.skipTest(f"symlinks unavailable: {exc}")
+
+            result = apply_rename_plan([RenamePlanItem(link, root / "new.wav", "change", "symlink")], True, root=root)
+
+            self.assertFalse(result[0].success)
+            self.assertIn("symlink", result[0].error.lower())
+            self.assertTrue(link.is_symlink())
+
+    def test_normal_file_rename_still_works_with_boundary(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "old.wav"
+            destination = root / "new.wav"
+            self._wav(source)
+
+            result = apply_rename_plan([RenamePlanItem(source, destination, "change", "normal")], True, root=root)
+
+            self.assertTrue(result[0].success)
+            self.assertTrue(destination.exists())
+            self.assertFalse(source.exists())
 
 
 if __name__ == "__main__":
