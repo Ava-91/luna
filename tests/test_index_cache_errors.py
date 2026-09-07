@@ -5,7 +5,7 @@ import wave
 from pathlib import Path
 
 from luna.index import LibraryIndex
-from luna.scanner import scan_library
+from luna.scanner import Track, scan_library
 
 
 class LibraryIndexMetadataErrorTests(unittest.TestCase):
@@ -85,17 +85,38 @@ class LibraryIndexMetadataErrorTests(unittest.TestCase):
             audio = root / "fields.wav"
             audio.write_bytes(b"not a wave file")
             index = LibraryIndex(root / "index.sqlite3")
+            track = Track(
+                audio,
+                "Title",
+                "Artist",
+                "Album",
+                3,
+                "Album Artist",
+                2,
+                2026,
+                "Genre",
+                "wav",
+                audio.stat().st_size,
+                audio.stat().st_mtime,
+                {},
+                "parser failed",
+            )
+            index.upsert(track, digest="digest", artwork=True)
 
-            first = scan_library(root, workers=1, index=index)[0]
             cached = index.get_track(audio)
-            self.assertEqual(cached.path, first.path)
-            self.assertEqual(cached.size, first.size)
-            self.assertEqual(cached.modified, first.modified)
-            self.assertEqual(cached.format, first.format)
-            self.assertEqual(cached.title, first.title)
-            self.assertEqual(cached.artist, first.artist)
-            self.assertEqual(cached.album, first.album)
-            self.assertEqual(cached.metadata_error, first.metadata_error)
+            self.assertEqual(cached.path, track.path)
+            self.assertEqual(cached.size, track.size)
+            self.assertEqual(cached.modified, track.modified)
+            self.assertEqual(cached.format, track.format)
+            self.assertEqual(cached.title, track.title)
+            self.assertEqual(cached.artist, track.artist)
+            self.assertEqual(cached.album, track.album)
+            self.assertEqual(cached.track_number, track.track_number)
+            self.assertEqual(cached.album_artist, track.album_artist)
+            self.assertEqual(cached.disc_number, track.disc_number)
+            self.assertEqual(cached.year, track.year)
+            self.assertEqual(cached.genre, track.genre)
+            self.assertEqual(cached.metadata_error, track.metadata_error)
             index.close()
 
     def test_existing_v1_database_is_upgraded_without_losing_data(self):
@@ -106,15 +127,9 @@ class LibraryIndexMetadataErrorTests(unittest.TestCase):
             index_path = root / "legacy.sqlite3"
 
             index = LibraryIndex(index_path)
-            index.connection.execute(
-                "DELETE FROM tracks"
-            )
-            index.connection.execute(
-                "UPDATE schema_version SET version=1"
-            )
-            index.connection.execute(
-                "ALTER TABLE tracks RENAME TO tracks_v2_backup"
-            )
+            index.connection.execute("DELETE FROM tracks")
+            index.connection.execute("UPDATE schema_version SET version=1")
+            index.connection.execute("ALTER TABLE tracks RENAME TO tracks_v2_backup")
             index.connection.execute(
                 "CREATE TABLE tracks(path TEXT PRIMARY KEY,size INTEGER NOT NULL,mtime REAL NOT NULL,digest TEXT,title TEXT,artist TEXT,album TEXT,album_artist TEXT,genre TEXT,year INTEGER,track_number INTEGER,disc_number INTEGER,artwork INTEGER NOT NULL DEFAULT 0)"
             )
