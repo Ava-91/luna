@@ -2,6 +2,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 import json
 from datetime import datetime, timezone
+import shutil
 
 
 @dataclass(frozen=True)
@@ -13,6 +14,7 @@ class Operation:
     field: str | None = None
     old_value: str | None = None
     new_value: str | None = None
+    backup_path: str | None = None
 
 
 class OperationLog:
@@ -20,7 +22,7 @@ class OperationLog:
         self.path = path
         self.operations = []
 
-    def record(self, action, source, destination, field=None, old_value=None, new_value=None):
+    def record(self, action, source, destination, field=None, old_value=None, new_value=None, backup_path=None):
         self.operations.append(
             Operation(
                 action,
@@ -30,11 +32,15 @@ class OperationLog:
                 field,
                 old_value,
                 new_value,
+                str(backup_path) if backup_path else None,
             )
         )
 
     def record_metadata(self, path, field, old_value, new_value):
         self.record("metadata", path, path, field, old_value, new_value)
+
+    def record_artwork(self, path, candidate, backup_path):
+        self.record("artwork", path, candidate, backup_path=backup_path)
 
     def save(self):
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -59,6 +65,8 @@ def _load_operations(log_path: Path):
             raise ValueError(f"Invalid paths in operation log entry at index {index}.")
         if op["action"] == "metadata" and not isinstance(op.get("field"), str):
             raise ValueError(f"Metadata operation at index {index} is missing a field.")
+        if op["action"] == "artwork" and op.get("backup_path") is not None and not isinstance(op["backup_path"], str):
+            raise ValueError(f"Artwork operation at index {index} has an invalid backup path.")
         operations.append(op)
     return operations
 
@@ -75,7 +83,6 @@ def rollback(log_path: Path, confirm=False):
                 from mutagen import File
 
                 path = Path(op["source"])
-                # Use the same easy metadata interface as metadata_apply.py.
                 audio = File(path, easy=True)
                 if audio is None:
                     raise OSError("Audio file could not be parsed.")
@@ -92,7 +99,21 @@ def rollback(log_path: Path, confirm=False):
             continue
 
         if op["action"] == "artwork":
-            results.append((False, str(op["source"]), "Artwork rollback is not supported."))
+            backup_path = op.get("backup_path")
+            source = Path(op["source"])
+            if not backup_path:
+                results.append((False, str(source), "Artwork rollback requires a backup created by the current apply workflow."))
+                continue
+            backup = Path(backup_path)
+            if not backup.is_file():
+                results.append((False, str(source), "Artwork backup is missing."))
+                continue
+            try:
+                source.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(backup, source)
+                results.append((True, str(source), str(backup)))
+            except OSError as exc:
+                results.append((False, str(source), str(exc)))
             continue
 
         src = Path(op["destination"])

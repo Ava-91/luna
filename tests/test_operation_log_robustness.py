@@ -32,12 +32,15 @@ class OperationLogRobustnessTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 rollback(self._write(Path(tmp), data), True)
 
-    def test_artwork_operation_is_not_treated_as_rename(self):
+    def test_artwork_operation_without_backup_is_safe(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             data = [{"action": "artwork", "source": str(root / "a.mp3"), "destination": str(root / "cover.jpg"), "timestamp": "now"}]
             results = rollback(self._write(root, data), True)
-            self.assertEqual(results, [(False, str(root / "a.mp3"), "Artwork rollback is not supported.")])
+            self.assertEqual(
+                results,
+                [(False, str(root / "a.mp3"), "Artwork rollback requires a backup created by the current apply workflow.")],
+            )
 
 
 if __name__ == "__main__":

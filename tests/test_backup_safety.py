@@ -110,6 +110,24 @@ class OperationLogSafetyTests(unittest.TestCase):
             self.assertEqual(fake_audio.tags["title"], ["old title"])
             self.assertTrue(fake_audio.saved)
 
+    def test_artwork_rollback_restores_full_original_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            source = root / "song.mp3"
+            backup = root / "backups" / "song.mp3.bak"
+            source.write_bytes(b"modified artwork file")
+            backup.parent.mkdir()
+            backup.write_bytes(b"original audio with original artwork")
+
+            log = OperationLog(root / "operations.json")
+            log.record_artwork(source, root / "cover.jpg", backup)
+            log.save()
+
+            results = rollback(log.path, True)
+
+            self.assertEqual(results, [(True, str(source), str(backup))])
+            self.assertEqual(source.read_bytes(), b"original audio with original artwork")
+
     def test_saved_log_contains_all_operation_fields(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -125,6 +143,7 @@ class OperationLogSafetyTests(unittest.TestCase):
             self.assertEqual(data[0]["field"], "title")
             self.assertEqual(data[0]["old_value"], "old")
             self.assertEqual(data[0]["new_value"], "new")
+            self.assertIsNone(data[0]["backup_path"])
             self.assertIn("timestamp", data[0])
 
 
