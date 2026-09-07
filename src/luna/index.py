@@ -18,7 +18,8 @@ CREATE TABLE IF NOT EXISTS tracks(
     year INTEGER,
     track_number INTEGER,
     disc_number INTEGER,
-    artwork INTEGER NOT NULL DEFAULT 0
+    artwork INTEGER NOT NULL DEFAULT 0,
+    metadata_error TEXT
 );
 '''
 
@@ -29,15 +30,23 @@ class LibraryIndex:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.connection = sqlite3.connect(path)
         self.connection.executescript(SCHEMA)
-        if self.connection.execute("SELECT COUNT(*) FROM schema_version").fetchone()[0] == 0:
-            self.connection.execute("INSERT INTO schema_version VALUES(1)")
+        columns = {row[1] for row in self.connection.execute("PRAGMA table_info(tracks)")}
+        if "metadata_error" not in columns:
+            self.connection.execute("ALTER TABLE tracks ADD COLUMN metadata_error TEXT")
+        row = self.connection.execute("SELECT MAX(version) FROM schema_version").fetchone()
+        version = row[0] if row and row[0] is not None else 0
+        if version < 2:
+            if version == 0:
+                self.connection.execute("INSERT INTO schema_version VALUES(2)")
+            else:
+                self.connection.execute("UPDATE schema_version SET version=2")
         self.connection.commit()
 
     def upsert(self, track: Track, digest: str | None = None, artwork: bool = False):
         stat = track.path.stat()
         self.connection.execute(
-            "INSERT INTO tracks(path,size,mtime,digest,title,artist,album,album_artist,genre,year,track_number,disc_number,artwork) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?) "
-            "ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,digest=excluded.digest,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,genre=excluded.genre,year=excluded.year,track_number=excluded.track_number,disc_number=excluded.disc_number,artwork=excluded.artwork",
+            "INSERT INTO tracks(path,size,mtime,digest,title,artist,album,album_artist,genre,year,track_number,disc_number,artwork,metadata_error) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?) "
+            "ON CONFLICT(path) DO UPDATE SET size=excluded.size,mtime=excluded.mtime,digest=excluded.digest,title=excluded.title,artist=excluded.artist,album=excluded.album,album_artist=excluded.album_artist,genre=excluded.genre,year=excluded.year,track_number=excluded.track_number,disc_number=excluded.disc_number,artwork=excluded.artwork,metadata_error=excluded.metadata_error",
             (
                 str(track.path),
                 stat.st_size,
@@ -52,6 +61,7 @@ class LibraryIndex:
                 track.track_number,
                 track.disc_number,
                 int(artwork),
+                track.metadata_error,
             ),
         )
         self.connection.commit()
@@ -68,12 +78,12 @@ class LibraryIndex:
 
     def get_track(self, path: Path) -> Track | None:
         row = self.connection.execute(
-            "SELECT size,mtime,title,artist,album,album_artist,genre,year,track_number,disc_number FROM tracks WHERE path=?",
+            "SELECT size,mtime,title,artist,album,album_artist,genre,year,track_number,disc_number,metadata_error FROM tracks WHERE path=?",
             (str(path),),
         ).fetchone()
         if row is None:
             return None
-        size, modified, title, artist, album, album_artist, genre, year, track_number, disc_number = row
+        size, modified, title, artist, album, album_artist, genre, year, track_number, disc_number, metadata_error = row
         return Track(
             path,
             title,
@@ -88,7 +98,7 @@ class LibraryIndex:
             size,
             modified,
             None,
-            None,
+            metadata_error,
         )
 
     def get_digest(self, path: Path):
