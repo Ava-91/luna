@@ -46,7 +46,7 @@ class CLISafetyTests(unittest.TestCase):
             log.write_text("[]", encoding="utf-8")
             with patch.object(cli, "rollback", return_value=[]) as rollback:
                 cli.main(["rollback", str(log), "--confirm"])
-        rollback.assert_called_once_with(log, True)
+        rollback.assert_called_once_with(log, True, None)
 
 
 if __name__ == "__main__":
