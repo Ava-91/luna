@@ -200,6 +200,12 @@ def _rollback_metadata(op, root):
     return (True, str(path), op["field"])
 
 
+def _persist_state(log_path, log, state):
+    payload = dict(log)
+    payload["state"] = state
+    _atomic_write_json(log_path, payload)
+
+
 def rollback(log_path: Path, confirm=False, root: Path | None = None):
     if not confirm:
         raise PermissionError("Rollback requires explicit confirmation (confirm=True).")
