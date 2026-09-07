@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from .planner import RenamePlanItem, validate_plan
 from .backup import OperationLog
+from .paths import resolve_mutation_path
 
 
 @dataclass(frozen=True)
@@ -22,9 +23,12 @@ def _temporary_path(source: Path, reserved: set[Path]) -> Path:
             return candidate
 
 
-def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_path: Path | None = None) -> list[AppliedChange]:
+def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_path: Path | None = None, root: Path | None = None) -> list[AppliedChange]:
     if not confirm:
         raise PermissionError("Applying changes requires explicit confirmation (confirm=True).")
+    if root is None:
+        raise ValueError("Applying renames requires the selected library root.")
+    root = root.expanduser().resolve()
     errors = validate_plan(plan)
     if errors:
         raise ValueError("Invalid rename plan: " + "; ".join(errors))
@@ -33,13 +37,18 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
     if not changes:
         return []
 
-    source_paths = {item.source.resolve() for item in changes}
+    source_paths = set()
     seen_sources = set()
     for item in changes:
-        source = item.source.resolve()
+        try:
+            source = resolve_mutation_path(root, item.source)
+            destination = resolve_mutation_path(root, item.destination)
+        except ValueError as exc:
+            return [AppliedChange(change.source, change.destination, False, str(exc)) for change in changes]
         if source in seen_sources:
             raise ValueError(f"Invalid rename plan: duplicate source: {item.source}")
         seen_sources.add(source)
+        source_paths.add(source)
         if not item.source.exists():
             return [
                 AppliedChange(change.source, change.destination, False, "Rename plan is stale: source no longer exists.")
@@ -47,15 +56,15 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
             ]
 
     for item in changes:
-        destination = item.destination.resolve()
+        destination = resolve_mutation_path(root, item.destination)
         if destination.exists() and destination not in source_paths:
             return [
                 AppliedChange(change.source, change.destination, False, f"Destination already exists: {change.destination}")
                 for change in changes
             ]
 
-    log = OperationLog(log_path) if log_path else None
-    reserved = source_paths | {item.destination.resolve() for item in changes}
+    log = OperationLog(log_path, root) if log_path else None
+    reserved = source_paths | {resolve_mutation_path(root, item.destination) for item in changes}
     temporary = {}
     completed = []
 
