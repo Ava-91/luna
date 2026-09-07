@@ -1,8 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
+from luna.config import LibraryProfile
 from luna.filenames import sanitize_component, suggest_renames, suggested_filename
+from luna.planner import build_rename_plan
 from luna.scanner import Track
 
 
@@ -10,6 +13,29 @@ class FilenameSuggestionTests(unittest.TestCase):
     def test_builds_artist_title_filename_with_track_number(self) -> None:
         track = Track(Path("old.MP3"), "Bad Guy", "Billie Eilish", "Album", 3)
         self.assertEqual(suggested_filename(track), "03 - Billie Eilish - Bad Guy.mp3")
+
+    def test_default_template_without_track_number_preserves_existing_behavior(self) -> None:
+        track = Track(Path("old.mp3"), "Song", "Artist", "Album")
+        self.assertEqual(suggested_filename(track), "Artist - Song.mp3")
+
+    def test_custom_template_uses_relevant_metadata(self) -> None:
+        track = Track(Path("old.mp3"), "Song", "Artist", "Album", 3, "Album Artist", 2, 2024, "Rock", "mp3")
+        self.assertEqual(
+            suggested_filename(track, "{artist} - {album} - {track} - {title} ({year})"),
+            "Artist - Album - 03 - Song (2024).mp3",
+        )
+
+    def test_configured_template_flows_through_rename_planner(self) -> None:
+        track = Track(Path("old.mp3"), "Song", "Artist", "Album", 3)
+        profile = LibraryProfile([], [".mp3"], [], filename_template="{album}/{title}")
+        with patch("luna.planner.load_config", return_value=profile):
+            plan = build_rename_plan([track])
+        self.assertEqual(plan[0].destination, Path("Album-Song.mp3"))
+
+    def test_invalid_template_is_reported(self) -> None:
+        track = Track(Path("old.mp3"), "Song", "Artist", "Album")
+        with self.assertRaisesRegex(ValueError, "Invalid filename template"):
+            suggested_filename(track, "{missing} - {title}")
 
     def test_sanitizes_unsafe_characters_and_reserved_names(self) -> None:
         self.assertEqual(sanitize_component('AC/DC: "Live"'), "AC-DC- Live")
