@@ -6,7 +6,7 @@ from luna.scanner import Track, scan_library
 from luna.filenames import sanitize_component
 from luna.normalize import normalize_text, normalize_track_number
 from luna.planner import build_rename_plan, validate_plan
-from luna.duplicates import find_probable_duplicates
+from luna.duplicates import find_probable_duplicates, probable_duplicate_score
 from luna.safety import safe_component
 from luna.config import LibraryProfile, save_config, load_config
 from luna.index import LibraryIndex
@@ -45,7 +45,13 @@ class LunaTests(unittest.TestCase):
     def test_probable_duplicates_never_delete(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); a=root/'one.mp3'; b=root/'renamed.flac'; a.write_bytes(b'abc'); b.write_bytes(b'abc'); tracks=[Track(a,'Song','Artist','Album',1,size=3),Track(b,'Song','Artist','Album',1,size=3)]
-            groups=find_probable_duplicates(tracks); self.assertEqual(len(groups),1); self.assertEqual(groups[0].confidence,.95); self.assertTrue(a.exists() and b.exists())
+            groups=find_probable_duplicates(tracks); self.assertEqual(len(groups),1); self.assertEqual(groups[0].confidence,.95); self.assertIn('artist matches',groups[0].reasons); self.assertIn('title matches',groups[0].reasons); self.assertTrue(a.exists() and b.exists())
+    def test_probable_duplicate_score_is_explainable_and_multi_signal(self):
+        first=Track(Path('one.mp3'),'Song','Artist','Album',1,size=100,year='2020')
+        second=Track(Path('two.mp3'),'Song','Artist','Other Album',2,size=101,year='2021')
+        confidence,reasons=probable_duplicate_score(first,second)
+        self.assertEqual(confidence,.60)
+        self.assertEqual(reasons,('artist matches','title matches'))
     def test_profile_round_trip(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'config.json'; profile=LibraryProfile(['Music'],['.mp3'],['Music/cache'],2); save_config(profile,path); self.assertEqual(load_config(path),profile)
