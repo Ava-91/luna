@@ -25,7 +25,7 @@ class TransactionRecoveryTests(unittest.TestCase):
             with patch("luna.metadata_apply.File", return_value=fake), patch("luna.backup.OperationLog.mark_completed", side_effect=OSError("interrupted")):
                 result = apply_metadata_plan([change], True, root / "operations.json", root)
             self.assertFalse(result[0][1])
-            with patch("luna.backup.File", return_value=fake):
+            with patch("mutagen.File", return_value=fake):
                 recovered = rollback(root / "operations.json", True)
             self.assertTrue(recovered[0][0])
             self.assertEqual(fake.tags["title"], ["old"])
