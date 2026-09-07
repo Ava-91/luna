@@ -66,7 +66,7 @@ class OperationLogSafetyTests(unittest.TestCase):
 
             results = rollback(log.path, True)
 
-            self.assertEqual(results, [(False, str(changed), "Original destination already exists.")])
+            self.assertEqual(results, [(False, str(original), "Original destination already exists.")])
             self.assertEqual(original.read_bytes(), b"original")
             self.assertEqual(changed.read_bytes(), b"changed")
 
