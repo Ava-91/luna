@@ -61,21 +61,26 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
 
     log = OperationLog(log_path, root) if log_path else None
     reserved = source_paths | {destination for _, destination in resolved_items.values()}
-    temporary = {}
-    completed = []
+    temporary = {item: _temporary_path(source, reserved) for item, (source, _) in resolved_items.items()}
+    log_indices = {}
+    if log:
+        for item in changes:
+            source, destination = resolved_items[item]
+            log_indices[item] = log.record("rename", source, destination, backup_path=temporary[item])
+        log.save()
 
+    completed = []
     try:
         for item in changes:
             source, _ = resolved_items[item]
-            temp = _temporary_path(source, reserved)
-            source.rename(temp)
-            temporary[item] = temp
+            source.rename(temporary[item])
 
         for item in changes:
             _, destination = resolved_items[item]
-            temp = temporary[item]
-            temp.rename(destination)
+            temporary[item].rename(destination)
             completed.append(item)
+            if log:
+                log.mark_completed(log_indices[item])
     except OSError as exc:
         recovery_errors = []
         for item in reversed(completed):
@@ -86,8 +91,8 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
                 recovery_errors.append(f"{destination} -> {source}: {recovery_exc}")
         for item in changes:
             source, _ = resolved_items[item]
-            temp = temporary.get(item)
-            if temp is not None and temp.exists():
+            temp = temporary[item]
+            if temp.exists():
                 try:
                     temp.rename(source)
                 except OSError as recovery_exc:
@@ -96,13 +101,14 @@ def apply_rename_plan(plan: list[RenamePlanItem], confirm: bool = False, log_pat
         if recovery_errors:
             detail = "; ".join(recovery_errors)
             raise RuntimeError(f"Rename failed and recovery was incomplete: {detail}") from exc
-
+        if log:
+            try:
+                log.abort()
+            except OSError:
+                pass
         return [AppliedChange(item.source, item.destination, False, f"Rename transaction rolled back after failure: {exc}" if item not in completed else "Rename transaction rolled back after failure.") for item in changes]
 
     if log:
-        for item in completed:
-            source, destination = resolved_items[item]
-            log.record("rename", source, destination)
-        log.save()
+        log.finalize()
 
     return [AppliedChange(item.source, item.destination, True) for item in completed]
