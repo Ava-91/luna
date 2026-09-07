@@ -2,7 +2,8 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
-from luna.scanner import Track, scan_library
+from mutagen import MutagenError
+from luna.scanner import Track, scan_library, inspect_file
 from luna.filenames import sanitize_component
 from luna.normalize import normalize_text, normalize_track_number
 from luna.planner import build_rename_plan, validate_plan
@@ -22,6 +23,18 @@ class LunaTests(unittest.TestCase):
             finally:
                 index.close()
             self.assertEqual([p.name for p in (t.path for t in tracks)],['a.mp3','b.flac']); self.assertTrue(all(t.metadata_error for t in tracks))
+    def test_scanner_handles_expected_mutagen_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'broken.mp3'; path.write_bytes(b'broken')
+            with patch('luna.scanner.File', side_effect=MutagenError('invalid audio')):
+                track=inspect_file(path)
+            self.assertEqual(track.metadata_error,'invalid audio')
+    def test_scanner_does_not_swallow_unexpected_errors(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'broken.mp3'; path.write_bytes(b'broken')
+            with patch('luna.scanner.File', side_effect=RuntimeError('programming failure')):
+                with self.assertRaises(RuntimeError):
+                    inspect_file(path)
     def test_index_reuses_unchanged_track_without_reparsing(self):
         with tempfile.TemporaryDirectory() as tmp:
             root=Path(tmp); path=root/'song.mp3'; path.write_bytes(b'not-real-audio'); index=LibraryIndex(root/'index.sqlite3')
