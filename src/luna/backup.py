@@ -94,20 +94,18 @@ def _rollback_rename_group(operations, root):
     """Restore a complete rename set, staging destinations so cycles are safe."""
     resolved = []
     current_paths = set()
-    original_paths = set()
     for op in operations:
         current = resolve_mutation_path(root, Path(op["destination"]))
         original = resolve_mutation_path(root, Path(op["source"]))
         resolved.append((op, current, original))
         current_paths.add(current)
-        original_paths.add(original)
 
     for _, current, _ in resolved:
         if not current.exists():
-            return [(False, str(current), "Changed file is missing.") for op, current, _ in resolved]
+            return [(False, str(current), "Changed file is missing.") for _, current, _ in resolved]
     for _, _, original in resolved:
         if original.exists() and original not in current_paths:
-            return [(False, str(original_paths and original), "Original destination already exists.") for _, _, original in resolved]
+            return [(False, str(original), "Original destination already exists.") for _, _, _ in resolved]
 
     staged = []
     try:
@@ -117,7 +115,7 @@ def _rollback_rename_group(operations, root):
             staged.append((op, current, temporary))
 
         restored = []
-        for op, original, temporary in ((op, original, temporary) for (op, _, original), (_, _, temporary) in zip(resolved, staged)):
+        for (op, _, _), (_, original, temporary) in zip(resolved, [(op, original, temporary) for op, _, original in resolved for _, _, temporary in staged if op is _]):
             temporary.rename(original)
             restored.append((True, str(Path(op["destination"])), str(Path(op["source"]))))
         return list(reversed(restored))
