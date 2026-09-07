@@ -115,7 +115,7 @@ def _rollback_rename_group(operations, root):
             staged.append((op, current, temporary))
 
         restored = []
-        for (op, _, _), (_, original, temporary) in zip(resolved, [(op, original, temporary) for op, _, original in resolved for _, _, temporary in staged if op is _]):
+        for (op, _, original), (_, _, temporary) in zip(resolved, staged):
             temporary.rename(original)
             restored.append((True, str(Path(op["destination"])), str(Path(op["source"]))))
         return list(reversed(restored))
