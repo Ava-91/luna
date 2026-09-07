@@ -4,7 +4,6 @@ from pathlib import Path
 
 from mutagen.id3 import ID3
 
-from luna.artwork_plan import ArtworkCandidate
 from luna.cli import apply_artwork_changes
 from luna.metadata_apply import MetadataChange, apply_metadata_plan
 from luna.paths import resolve_mutation_path
@@ -45,6 +44,7 @@ class MutationPathSafetyTests(unittest.TestCase):
             root = Path(tmp)
             target = root / "song.mp3"
             self._mp3(target)
+            original = target.read_bytes()
             link = root / "link.mp3"
             self._symlink(link, target)
 
@@ -52,7 +52,7 @@ class MutationPathSafetyTests(unittest.TestCase):
 
             self.assertFalse(results[0][1])
             self.assertIn("symlink", results[0][2].lower())
-            self.assertEqual(target.read_bytes(), target.read_bytes())
+            self.assertEqual(target.read_bytes(), original)
 
     def test_nested_external_symlink_is_rejected_for_metadata_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -67,12 +67,13 @@ class MutationPathSafetyTests(unittest.TestCase):
             link1 = root / "link1.mp3"
             self._symlink(link2, target)
             self._symlink(link1, link2)
+            original = target.read_bytes()
 
             results = apply_metadata_plan([MetadataChange(link1, "title", None, "blocked")], True, root=root / "operations.json", root=root)
 
             self.assertFalse(results[0][1])
             self.assertIn("symlink", results[0][2].lower())
-            self.assertTrue(target.exists())
+            self.assertEqual(target.read_bytes(), original)
 
     def test_missing_symlink_target_is_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
