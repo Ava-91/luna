@@ -52,12 +52,13 @@ def suggested_filename(track: Track, template: str = DEFAULT_FILENAME_TEMPLATE) 
         "format": track.format or track.path.suffix.lower().lstrip("."),
     }
     try:
-        rendered = template.format_map(values)
+        if template == DEFAULT_FILENAME_TEMPLATE and not values["track"]:
+            rendered = "{artist} - {title}".format_map(values)
+        else:
+            rendered = template.format_map(values)
     except (KeyError, ValueError) as exc:
         raise ValueError(f"Invalid filename template: {exc}") from exc
 
-    if template == DEFAULT_FILENAME_TEMPLATE and not values["track"]:
-        rendered = rendered.replace(" -  - ", " - ", 1)
     rendered = sanitize_component(rendered)
     return f"{rendered}{track.path.suffix.lower()}"
 
