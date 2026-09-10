@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 from collections import defaultdict
+from types import SimpleNamespace
 from mutagen import File
 
 
@@ -26,6 +27,30 @@ class ArtworkInfo:
     entries: tuple[ArtworkEntry, ...] = ()
 
 
+def _embedded_pictures(audio, path: Path):
+    pictures = list(getattr(audio, "pictures", None) or [])
+    if pictures:
+        return pictures
+    tags = getattr(audio, "tags", None)
+    if tags is None:
+        return []
+    suffix = path.suffix.lower()
+    if suffix == ".mp3":
+        return list(tags.getall("APIC"))
+    if suffix in {".m4a", ".mp4"}:
+        from mutagen.mp4 import MP4Cover
+
+        mime_by_format = {
+            MP4Cover.FORMAT_JPEG: "image/jpeg",
+            MP4Cover.FORMAT_PNG: "image/png",
+        }
+        return [
+            SimpleNamespace(data=bytes(cover), mime=mime_by_format.get(getattr(cover, "imageformat", None)))
+            for cover in tags.get("covr", [])
+        ]
+    return []
+
+
 def _inspect_picture(index: int, picture) -> ArtworkEntry:
     data = bytes(getattr(picture, "data", b""))
     mime = getattr(picture, "mime", None)
@@ -48,7 +73,7 @@ def _inspect_picture(index: int, picture) -> ArtworkEntry:
 def inspect_artwork(path: Path) -> ArtworkInfo:
     try:
         audio = File(path)
-        pictures = list(getattr(audio, "pictures", None) or [])
+        pictures = _embedded_pictures(audio, path)
         if not pictures:
             return ArtworkInfo(path, False, reason="No embedded artwork.")
 
