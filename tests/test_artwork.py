@@ -23,7 +23,7 @@ _VALID_PNG = bytes.fromhex(
 class ArtworkAuditTests(unittest.TestCase):
     def test_audit_inspects_all_embedded_pictures(self):
         first = SimpleNamespace(data=_VALID_PNG, mime="image/png")
-        second = SimpleNamespace(data=b"not-an-image", mime="image/jpeg")
+        second = SimpleNamespace(data=b"", mime="image/jpeg")
         audio = SimpleNamespace(pictures=[first, second])
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "song.flac"
@@ -52,6 +52,15 @@ class ArtworkAuditTests(unittest.TestCase):
         self.assertEqual(len(result.entries), 2)
         self.assertEqual(result.mime, "image/png")
         self.assertEqual(result.entries[1].mime, "image/png")
+
+    @unittest.skipUnless(Image is not None, "Pillow is required for malformed image testing")
+    def test_malformed_image_bytes_are_reported_invalid(self):
+        picture = SimpleNamespace(data=b"not-an-image", mime="image/png")
+        with patch("luna.artwork.File", return_value=SimpleNamespace(pictures=[picture])):
+            result = inspect_artwork(Path("song.flac"))
+        self.assertTrue(result.has_artwork)
+        self.assertFalse(result.valid)
+        self.assertIn("could not be decoded", result.reason)
 
     @unittest.skipUnless(Image is not None, "Pillow is required for decoder exception testing")
     def test_unexpected_decoder_exception_is_not_swallowed(self):
