@@ -183,6 +183,19 @@ def _rollback_rename_group(operations, root):
         return [(False, str(op["destination"]), f"Rename rollback failed{detail}") for op in operations]
 
 
+def _current_metadata_value(audio, field):
+    if audio.tags is None:
+        return None
+    value = audio.tags.get(field)
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple)):
+        if len(value) == 1:
+            return str(value[0])
+        return tuple(str(item) for item in value)
+    return str(value)
+
+
 def _rollback_metadata(op, root):
     from mutagen import File
     path = Path(op["source"])
@@ -192,6 +205,18 @@ def _rollback_metadata(op, root):
         raise OSError("Audio file could not be parsed.")
     if audio.tags is None:
         audio.add_tags()
+
+    if op.get("status", "completed") == "pending":
+        current = _current_metadata_value(audio, op["field"])
+        old_value = op.get("old_value")
+        new_value = op.get("new_value")
+        if current == old_value:
+            return (True, str(path), op["field"])
+        if current != new_value:
+            raise ValueError(
+                f"Metadata rollback conflict for {op['field']}: current value differs from both the recorded old and new values."
+            )
+
     if op["old_value"] is None:
         audio.tags.pop(op["field"], None)
     else:
