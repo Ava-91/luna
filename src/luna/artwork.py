@@ -40,7 +40,7 @@ def _inspect_picture(index: int, picture) -> ArtworkEntry:
             width, height = image.size
     except ImportError:
         pass
-    except Exception:
+    except (OSError, Image.DecompressionBombError):
         return ArtworkEntry(index, mime, None, None, False, "Artwork image could not be decoded.")
     return ArtworkEntry(index, mime, width, height, True)
 
