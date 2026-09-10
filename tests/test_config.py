@@ -30,6 +30,22 @@ class ConfigValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "filename_template.*non-empty string"):
             validate_profile(LibraryProfile([], [".mp3"], [], filename_template=""))
 
+    def test_all_supported_filename_placeholders_are_valid(self):
+        template = "{track} {artist} {title} {album} {album_artist} {disc} {year} {genre} {format}"
+        self.assertEqual(validate_profile(LibraryProfile([], [".mp3"], [], filename_template=template)).filename_template, template)
+
+    def test_unsupported_filename_placeholder_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "filename_template.*unsupported field.*banana"):
+            validate_profile(LibraryProfile([], [".mp3"], [], filename_template="{banana}"))
+
+    def test_malformed_filename_template_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "filename_template.*invalid"):
+            validate_profile(LibraryProfile([], [".mp3"], [], filename_template="{title"))
+
+    def test_nested_unsupported_filename_placeholder_is_rejected(self):
+        with self.assertRaisesRegex(ValueError, "filename_template.*unsupported field.*width"):
+            validate_profile(LibraryProfile([], [".mp3"], [], filename_template="{title:{width}}"))
+
     def test_unknown_configuration_fields_are_rejected(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "config.json"
