@@ -31,11 +31,17 @@ class ScannerIndexRaceTests(unittest.TestCase):
             track = Track(path, "Song", "Artist", "Album", format="mp3", size=5, modified=path.stat().st_mtime)
 
             with patch("luna.scanner.inspect_file", return_value=track):
-                result = scan_library(root, extensions=[".mp3"], index=_DisappearingIndex(), on_error=errors.append)
+                result = scan_library(
+                    root,
+                    extensions=[".mp3"],
+                    index=_DisappearingIndex(),
+                    on_error=lambda error_path, exc: errors.append((error_path, exc)),
+                )
 
             self.assertEqual(result, [track])
             self.assertEqual(len(errors), 1)
-            self.assertIsInstance(errors[0], FileNotFoundError)
+            self.assertEqual(errors[0][0], path)
+            self.assertIsInstance(errors[0][1], FileNotFoundError)
 
 
 if __name__ == "__main__":
