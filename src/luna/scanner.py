@@ -76,7 +76,11 @@ def scan_library(root:Path,extensions=None,ignored_paths=None,workers=4,on_error
         with ThreadPoolExecutor(max_workers=max(1,workers)) as pool:
             for track in pool.map(inspect_file,pending):
                 tracks.append(track)
-                index.upsert(track)
+                try:
+                    index.upsert(track)
+                except OSError as exc:
+                    if on_error:
+                        on_error(track.path, exc)
                 completed+=1
                 if on_progress:on_progress(completed,total,track)
 
