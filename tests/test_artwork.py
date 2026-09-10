@@ -56,9 +56,8 @@ class ArtworkAuditTests(unittest.TestCase):
     @unittest.skipUnless(Image is not None, "Pillow is required for decoder exception testing")
     def test_unexpected_decoder_exception_is_not_swallowed(self):
         picture = SimpleNamespace(data=_VALID_PNG, mime="image/png")
-        with patch("luna.artwork.Image.open", side_effect=RuntimeError("unexpected decoder failure")):
+        with patch("PIL.Image.open", side_effect=RuntimeError("unexpected decoder failure")):
             with self.assertRaisesRegex(RuntimeError, "unexpected decoder failure"):
-                # _inspect_picture is exercised through the public inspection API.
                 with patch("luna.artwork.File", return_value=SimpleNamespace(pictures=[picture])):
                     inspect_artwork(Path("song.flac"))
 
