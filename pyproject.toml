@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "luna-music-manager"
-version = "0.2.0"
+version = "1.0.0"
 description = "A local-first music library cleaner"
 readme = "README.md"
 requires-python = ">=3.11"
