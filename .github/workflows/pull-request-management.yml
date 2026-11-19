@@ -1,6 +1,12 @@
 name: Pull request management
 
 on:
+  # The file's first addition to main triggers the one-time historical backfill.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/pull-request-management.yml'
+  # After backfill, only newly opened PRs are processed.
   pull_request:
     types: [opened]
   workflow_dispatch:
@@ -26,8 +32,19 @@ jobs:
             const repo = context.repo.repo;
             const label = 'pull-request';
             const assignee = 'Ava-91';
+            const workflowPath = '.github/workflows/pull-request-management.yml';
 
-            // Ensure the universal PR label exists before applying it.
+            // On push, backfill only when this workflow file is first added.
+            // A later edit to this file must not cause another full backfill.
+            if (context.eventName === 'push') {
+              const added = (context.payload.commits || [])
+                .some(commit => (commit.added || []).includes(workflowPath));
+              if (!added) {
+                core.info('Workflow file was not newly added; skipping historical backfill.');
+                return;
+              }
+            }
+
             try {
               await github.rest.issues.getLabel({ owner, repo, name: label });
             } catch (error) {
@@ -43,17 +60,16 @@ jobs:
               }
             }
 
-            // The one-time/manual backfill includes open, closed, and merged PRs.
-            // Normal event runs touch only the newly opened PR.
+            // Initial run: every PR, regardless of open/closed/merged state.
+            // Later runs: only the PR from the opened event.
             let pullRequests;
-            if (context.eventName === 'workflow_dispatch') {
+            if (context.eventName === 'workflow_dispatch' || context.eventName === 'push') {
               pullRequests = await github.paginate(github.rest.pulls.list, {
                 owner, repo, state: 'all', per_page: 100
               });
-              core.info(`Backfilling ${pullRequests.length} existing PRs.`);
+              core.info(`Historical backfill: ${pullRequests.length} PRs.`);
             } else {
-              const number = context.payload.pull_request.number;
-              pullRequests = [{ number }];
+              pullRequests = [{ number: context.payload.pull_request.number }];
             }
 
             for (const pr of pullRequests) {
