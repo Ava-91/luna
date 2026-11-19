@@ -1,6 +1,11 @@
 name: Branch cleanup
 
 on:
+  # Run once immediately when the cleanup workflow is first installed/updated on main.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/branch-cleanup.yml'
   schedule:
     - cron: '23 5 * * 1'
   workflow_dispatch:
