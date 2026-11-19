@@ -7,7 +7,7 @@ on:
     paths:
       - '.github/workflows/pull-request-management.yml'
   # After backfill, only newly opened PRs are processed.
-  pull_request:
+  pull_request_target:
     types: [opened]
   workflow_dispatch:
 
