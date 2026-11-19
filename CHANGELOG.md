@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.0.0 — 2026-11-19
+
+First stable release of Luna.
+
+- Read-only-by-default scanning and metadata inspection for local music libraries.
+- Exact and probable duplicate detection without automatic deletion.
+- Embedded artwork auditing and reviewable replacement plans.
+- Metadata normalization and collision-aware filename rename plans.
+- Explicitly confirmed apply operations with JSON operation logs and rollback support.
+- Library health reports and JSON, Markdown, and text exports.
+- Optional SQLite indexing, configurable profiles, and a PySide6 desktop shell.
+- Opt-in metadata-provider abstractions; the default workflow remains offline and local-first.
+- Automated regression coverage and disposable-library integration/rollback validation.
+
 ## 0.2.0 — 2026-08-19
 
 - Added recursive resilient audio scanning with richer metadata records and safe parallel reads.
