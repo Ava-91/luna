@@ -1,14 +1,16 @@
 name: Pull request management
 
 on:
-  # The file's first addition to main triggers the one-time historical backfill.
+  # A commit explicitly marked [backfill-prs] triggers a full historical backfill.
+  # Ordinary workflow edits do not reprocess existing PRs.
   push:
     branches: [main]
     paths:
       - '.github/workflows/pull-request-management.yml'
-  # After backfill, only newly opened PRs are processed.
+  # Future PRs: process only newly opened PRs.
   pull_request_target:
     types: [opened]
+  # Manual runs always perform a full backfill.
   workflow_dispatch:
 
 permissions:
@@ -32,15 +34,13 @@ jobs:
             const repo = context.repo.repo;
             const label = 'pull-request';
             const assignee = 'Ava-91';
-            const workflowPath = '.github/workflows/pull-request-management.yml';
 
-            // On push, backfill only when this workflow file is first added.
-            // A later edit to this file must not cause another full backfill.
+            // Only an explicitly marked push performs a historical backfill.
+            // This prevents ordinary workflow edits from repeatedly processing all PRs.
             if (context.eventName === 'push') {
-              const added = (context.payload.commits || [])
-                .some(commit => (commit.added || []).includes(workflowPath));
-              if (!added) {
-                core.info('Workflow file was not newly added; skipping historical backfill.');
+              const message = context.payload.head_commit?.message || '';
+              if (!message.includes('[backfill-prs]')) {
+                core.info('No [backfill-prs] marker in commit message; skipping historical backfill.');
                 return;
               }
             }
@@ -61,7 +61,7 @@ jobs:
               }
             }
 
-            // Initial/manual backfill: all PRs, regardless of state.
+            // Manual dispatch and marked installation pushes: every PR, any state.
             // Normal future event: only the newly opened PR.
             let pullRequests;
             if (context.eventName === 'workflow_dispatch' || context.eventName === 'push') {
