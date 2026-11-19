@@ -1,0 +1,97 @@
+name: Branch cleanup
+
+on:
+  # Run once immediately when the cleanup workflow is first installed/updated on main.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/branch-cleanup.yml'
+  schedule:
+    - cron: '23 5 * * 1'
+  workflow_dispatch:
+  pull_request_target:
+    types: [closed]
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: branch-cleanup
+  cancel-in-progress: false
+
+jobs:
+  cleanup:
+    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete merged and long-stale branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const { data: repository } = await github.rest.repos.get({ owner, repo });
+            const defaultBranch = repository.default_branch;
+            const staleDays = 90;
+            const cutoff = Date.now() - staleDays * 24 * 60 * 60 * 1000;
+
+            const [branches, openPulls] = await Promise.all([
+              github.paginate(github.rest.repos.listBranches, {
+                owner, repo, per_page: 100
+              }),
+              github.paginate(github.rest.pulls.list, {
+                owner, repo, state: 'open', per_page: 100
+              })
+            ]);
+
+            const openHeadBranches = new Set(
+              openPulls
+                .filter(pr => pr.head.repo && pr.head.repo.full_name === `${owner}/${repo}`)
+                .map(pr => pr.head.ref)
+            );
+
+            for (const branch of branches) {
+              const name = branch.name;
+              if (name === defaultBranch || branch.protected || openHeadBranches.has(name)) {
+                core.info(`Keeping protected/default/open-PR branch: ${name}`);
+                continue;
+              }
+
+              // A branch is safe to prune if it is already fully contained in
+              // the default branch, or if it has had no commit activity for 90 days.
+              const comparison = await github.rest.repos.compareCommits({
+                owner, repo, base: defaultBranch, head: name
+              });
+              const isMerged = comparison.data.ahead_by === 0;
+              let isStale = false;
+
+              if (!isMerged) {
+                const commitDate = new Date(
+                  comparison.data.commits.at(-1)?.commit?.committer?.date ||
+                  comparison.data.commits.at(-1)?.commit?.author?.date ||
+                  0
+                ).getTime();
+                isStale = commitDate > 0 && commitDate < cutoff;
+              }
+
+              if (!isMerged && !isStale) {
+                core.info(`Keeping active/unmerged branch: ${name}`);
+                continue;
+              }
+
+              // Recheck immediately before deletion to avoid racing a newly
+              // opened PR. Only same-repository branch refs are considered.
+              const latestOpenPulls = await github.rest.pulls.list({
+                owner, repo, state: 'open', head: `${owner}:${name}`, per_page: 1
+              });
+              if (latestOpenPulls.data.length) {
+                core.info(`Keeping branch with newly opened PR: ${name}`);
+                continue;
+              }
+
+              await github.rest.git.deleteRef({
+                owner, repo, ref: `heads/${name}`
+              });
+              core.info(`Deleted ${isMerged ? 'merged' : '90-day stale'} branch: ${name}`);
+            }
