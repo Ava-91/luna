@@ -2,16 +2,78 @@ name: Release build
 on:
   push:
     tags: ['v*']
+permissions:
+  contents: write
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python scripts/build_release.py
+      - name: Run complete validation suite
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e '.[dev]'
+          python -m unittest discover -s tests -v
+          python -m pytest -q
+          python -m ruff check src tests
+          python -m compileall -q src
+          python -m pip check
+      - name: Build source and wheel distributions
+        run: python scripts/build_release.py
+      - name: Inspect distributions
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          artifacts = list(Path("dist").glob("*"))
+          assert len(artifacts) == 2, f"Expected sdist and wheel, got: {artifacts}"
+          wheel = next(path for path in artifacts if path.suffix == ".whl")
+          sdist = next(path for path in artifacts if path.name.endswith(".tar.gz"))
+          with zipfile.ZipFile(wheel) as archive:
+              names = archive.namelist()
+              assert any(name.endswith("luna/cli.py") for name in names)
+              assert any(name.endswith("METADATA") for name in names)
+          with tarfile.open(sdist, "r:gz") as archive:
+              names = archive.getnames()
+              assert any(name.endswith("/src/luna/cli.py") for name in names)
+              assert any(name.endswith("/pyproject.toml") for name in names)
+          print("\n".join(str(path) for path in artifacts))
+          PY
+      - name: Install wheel in a clean environment
+        run: |
+          python -m venv "$RUNNER_TEMP/luna-clean"
+          "$RUNNER_TEMP/luna-clean/bin/python" -m pip install --upgrade pip
+          "$RUNNER_TEMP/luna-clean/bin/python" -m pip install dist/*.whl
+          "$RUNNER_TEMP/luna-clean/bin/python" -m pip check
+          "$RUNNER_TEMP/luna-clean/bin/luna" --help
+      - name: Smoke-test installed CLI on a disposable library
+        run: |
+          mkdir -p "$RUNNER_TEMP/luna-smoke-library"
+          python - <<'PY'
+          import os
+          import wave
+          from pathlib import Path
+          path = Path(os.environ["RUNNER_TEMP"]) / "luna-smoke-library" / "smoke.wav"
+          with wave.open(str(path), "wb") as audio:
+              audio.setnchannels(1)
+              audio.setsampwidth(2)
+              audio.setframerate(8000)
+              audio.writeframes(b"\x00\x00" * 64)
+          PY
+          "$RUNNER_TEMP/luna-clean/bin/luna" scan "$RUNNER_TEMP/luna-smoke-library"
       - uses: actions/upload-artifact@v4
         with:
           name: luna-${{ github.ref_name }}
           path: dist/*
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: Luna ${{ github.ref_name }}
+          body_path: docs/releases/v1.0.0.md
+          files: dist/*
+          fail_on_unmatched_files: true
